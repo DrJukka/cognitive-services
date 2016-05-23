@@ -1,0 +1,69 @@
+﻿<UserControl
+    x:Class="FaceDetection.Controls.FaceDetector"
+    x:Name="thisPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:FaceDetection.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    d:DesignHeight="300"
+    d:DesignWidth="400">
+    <Grid HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        
+        <Grid x:Name="PreviewGrid" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+            <!--Camera preview-->
+            <CaptureElement Name="PreviewControl" Stretch="Uniform"/>
+
+            <Canvas>
+                <!--Canvas that will host the face detection bounding boxes, will share the same bounds as the preview within the CaptureElement-->
+                <!--It's contained inside of another canvas to allow for adjusting its size and position after applying a RenderTransform -->
+                <!--For more details, see SetFacesCanvasRotation-->
+                <Canvas Name="FacesCanvas" RenderTransformOrigin="0.5,0.5"/>
+            </Canvas>
+        </Grid>
+        <Grid x:Name="detailsList" HorizontalAlignment="Left" VerticalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="50" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <ListView
+                x:Name="FaceListBox"
+                Grid.Row="1"
+                ItemContainerTransitions="{x:Null}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <local:FaceDetailControl />
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+        <Grid x:Name="emotionList" HorizontalAlignment="Right" VerticalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="50" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <ListView
+                x:Name="EmotionListBox"
+                Grid.Row="1"
+                ItemContainerTransitions="{x:Null}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <local:EmotionDetailControl />
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </Grid>
+        
+    </Grid>
+</UserControl>
