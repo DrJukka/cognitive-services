@@ -97,7 +97,7 @@ namespace FaceDetection.Controls
             if (_mediaCapture == null)
             {
                 // Attempt to get the front camera if one is available, but use any camera device if not
-                var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front);
+                var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front,"Microsoft");
 
                 if (cameraDevice == null)
                 {
@@ -697,14 +697,18 @@ namespace FaceDetection.Controls
         /// </summary>
         /// <param name="desiredPanel">The desired panel on which the returned device should be mounted, if available</param>
         /// <returns></returns>
-        private static async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel)
+        private static async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel, string name)
         {
             // Get available devices for capturing pictures
             var allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
 
-            // Get the desired camera by panel
-            DeviceInformation desiredDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation != null && x.EnclosureLocation.Panel == desiredPanel);
+            DeviceInformation desiredDevice = allVideoDevices.FirstOrDefault(x => x.Name.Contains(name));
 
+            if (desiredDevice == null)
+            {
+                // Get the desired camera by panel
+                desiredDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation != null && x.EnclosureLocation.Panel == desiredPanel);
+            }
             // If there is no device mounted on the desired panel, return the first device found
             return desiredDevice ?? allVideoDevices.FirstOrDefault();
         }

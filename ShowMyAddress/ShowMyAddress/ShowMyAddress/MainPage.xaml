@@ -1,0 +1,22 @@
+﻿<Page
+    x:Class="ShowMyAddress.MainPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:ShowMyAddress.Controls"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="AUTO"/>
+        </Grid.RowDefinitions>
+        <local:MyMapControl Grid.Row="0" x:Name="myMap" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        </local:MyMapControl>
+        <StackPanel Grid.Row="1" Orientation="Horizontal">
+            <TextBlock x:Name="StatusBox"></TextBlock>
+            <TextBlock x:Name="resultBox" Margin="30,0,0,0"></TextBlock>
+        </StackPanel>
+    </Grid>
+</Page>
