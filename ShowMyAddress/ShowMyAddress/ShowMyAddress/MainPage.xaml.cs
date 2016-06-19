@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
 using Windows.ApplicationModel;
 using Windows.Devices.Geolocation;
 using Windows.Foundation;
@@ -65,7 +66,7 @@ namespace ShowMyAddress
                 _recognizer.RecognizerStatusChanged += Recognizer_RecognizerStatusChanged;
                 _recognizer.HypothesisGenerated += Recognizer_HypothesisGenerated;
                 _recognizer.ResultGenerated += Recognizer_ResultGenerated;
-                _recognizer.Start();
+                _recognizer.Start(SpeechRecognitionScenario.FormFilling);
             }
         }
 
@@ -74,7 +75,7 @@ namespace ShowMyAddress
             _recognizer.RecognizerStatusChanged += Recognizer_RecognizerStatusChanged;
             _recognizer.HypothesisGenerated += Recognizer_HypothesisGenerated;
             _recognizer.ResultGenerated += Recognizer_ResultGenerated;
-            _recognizer.Start();
+            _recognizer.Start(SpeechRecognitionScenario.FormFilling);
         }
 
         protected override void OnNavigatingFrom(NavigatingCancelEventArgs e)
@@ -83,6 +84,12 @@ namespace ShowMyAddress
             _recognizer.HypothesisGenerated -= Recognizer_HypothesisGenerated;
             _recognizer.ResultGenerated -= Recognizer_ResultGenerated;
             _recognizer.Stop();
+        }
+
+        private async Task ReStartRecognition()
+        {
+            await _recognizer.Stop();
+            _recognizer.Start(SpeechRecognitionScenario.Dictation);
         }
 
         public async void Recognizer_RecognizerStatusChanged(Recognizer sender, SpeechRecognizerStateChangedEventArgs args)
@@ -103,20 +110,36 @@ namespace ShowMyAddress
                 resultBox.Text = hypothesis + "...";
             });
         }
-        public async void Recognizer_ResultGenerated(Recognizer sender, string result)
+        public async void Recognizer_ResultGenerated(Recognizer sender, string result, SpeechRecognitionConfidence confidence)
         {
             Debug.WriteLine("ResultGenerated " + result);
             await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, async () =>
             {
-                resultBox.Foreground = new SolidColorBrush(Colors.Black);
-                resultBox.Text = result;
-
-                Geopoint newPointn = await myMap.FindLocation(result);
-                if(newPointn != null)
+                if (confidence == SpeechRecognitionConfidence.Medium
+                || confidence == SpeechRecognitionConfidence.High)
+                //|| confidence == SpeechRecognitionConfidence.Low)
                 {
-                    myMap.Center = newPointn;
+                    resultBox.Foreground = new SolidColorBrush(Colors.Black);
+                    resultBox.Text = result;
+
+                    Geopoint newPointn = await myMap.FindLocation(result);
+                    if (newPointn != null)
+                    {
+                        myMap.Center = newPointn;
+                    }
                 }
+                else
+                {
+                    Debug.WriteLine("SpeechRecognitionConfidence " + confidence);
+                }
+
+
+                lastResultBox.Text = resultBox.Text;
+                resultBox.Text = "";
             });
+
+            ReStartRecognition();
+
         }
     }
 }

@@ -12,7 +12,7 @@ namespace WordCloud.Speech
 {
     public delegate void RecognizerStatusChanged(Recognizer sender, SpeechRecognizerStateChangedEventArgs args);
     public delegate void HypothesisGenerated(Recognizer sender, string hypothesis);
-    public delegate void ResultGenerated(Recognizer sender, string result);
+    public delegate void ResultGenerated(Recognizer sender, string result, SpeechRecognitionConfidence confidence);
     public class Recognizer
     {
         public RecognizerStatusChanged RecognizerStatusChanged;
@@ -23,12 +23,12 @@ namespace WordCloud.Speech
         private SpeechRecognizer speechRecognizer;    
         private static uint HResultPrivacyStatementDeclined = 0x80045509;
 
-        public async void Start()
+        public async void Start(SpeechRecognitionScenario scenario)
         {
             bool permissionGained = await AudioCapturePermissions.RequestMicrophonePermission();
             if (permissionGained)
             {
-                await InitializeRecognizer(SpeechRecognizer.SystemSpeechLanguage);
+                await InitializeRecognizer(SpeechRecognizer.SystemSpeechLanguage, scenario);
                 StartDictating();
             }
             else
@@ -38,9 +38,9 @@ namespace WordCloud.Speech
             }
         }
 
-        public void Stop()
+        public async Task Stop()
         {
-            StopDictating();
+            await StopDictating();
         }
 
         /// <summary>
@@ -48,7 +48,7 @@ namespace WordCloud.Speech
         /// </summary>
         /// <param name="recognizerLanguage">Language to use for the speech recognizer</param>
         /// <returns>Awaitable task.</returns>
-        private async Task InitializeRecognizer(Language recognizerLanguage)
+        private async Task InitializeRecognizer(Language recognizerLanguage, SpeechRecognitionScenario scenario)
         {
             if (speechRecognizer != null)
             {
@@ -69,7 +69,7 @@ namespace WordCloud.Speech
             speechRecognizer.StateChanged += SpeechRecognizer_StateChanged;
 
             // Apply the dictation topic constraint to optimize for dictated freeform speech.
-            var dictationConstraint = new SpeechRecognitionTopicConstraint(SpeechRecognitionScenario.Dictation, "dictation");
+            var dictationConstraint = new SpeechRecognitionTopicConstraint(scenario, "dictation");
             speechRecognizer.Constraints.Add(dictationConstraint);
             SpeechRecognitionCompilationResult result = await speechRecognizer.CompileConstraintsAsync();
             if (result.Status != SpeechRecognitionResultStatus.Success)
@@ -116,7 +116,7 @@ namespace WordCloud.Speech
                 }
             }
         }
-        public async void StopDictating()
+        public async Task StopDictating()
         {
             if (speechRecognizer.State != SpeechRecognizerState.Idle)
             {
@@ -177,7 +177,7 @@ namespace WordCloud.Speech
                 args.Result.Confidence == SpeechRecognitionConfidence.Low)
             {
                 string result = args.Result.Text;
-                ResultGenerated?.Invoke(this, result);
+                ResultGenerated?.Invoke(this, result, args.Result.Confidence);
             }
             else
             {

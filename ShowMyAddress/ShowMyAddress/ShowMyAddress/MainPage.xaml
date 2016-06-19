@@ -11,12 +11,17 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="AUTO"/>
+            <RowDefinition Height="AUTO"/>
         </Grid.RowDefinitions>
         <local:MyMapControl Grid.Row="0" x:Name="myMap" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
         </local:MyMapControl>
         <StackPanel Grid.Row="1" Orientation="Horizontal">
             <TextBlock x:Name="StatusBox"></TextBlock>
             <TextBlock x:Name="resultBox" Margin="30,0,0,0"></TextBlock>
+        </StackPanel>
+        <StackPanel Grid.Row="2" Orientation="Horizontal">
+            <TextBlock >Last result: </TextBlock>
+            <TextBlock x:Name="lastResultBox" Margin="30,0,0,0"></TextBlock>
         </StackPanel>
     </Grid>
 </Page>
