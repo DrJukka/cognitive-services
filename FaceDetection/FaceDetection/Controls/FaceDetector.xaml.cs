@@ -97,7 +97,8 @@ namespace FaceDetection.Controls
             if (_mediaCapture == null)
             {
                 // Attempt to get the front camera if one is available, but use any camera device if not
-                var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front,"Microsoft");
+                //my lice-cam has Microsoft as part of its name, so I can select it with Microsoft name
+                var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
 
                 if (cameraDevice == null)
                 {
@@ -700,13 +701,12 @@ namespace FaceDetection.Controls
         private static async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel, string name)
         {
             // Get available devices for capturing pictures
-            var allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+            DeviceInformationCollection  allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
 
             DeviceInformation desiredDevice = allVideoDevices.FirstOrDefault(x => x.Name.Contains(name));
-
+            // Get the desired camera by panel
             if (desiredDevice == null)
             {
-                // Get the desired camera by panel
                 desiredDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation != null && x.EnclosureLocation.Panel == desiredPanel);
             }
             // If there is no device mounted on the desired panel, return the first device found
