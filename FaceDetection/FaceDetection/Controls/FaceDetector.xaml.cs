@@ -19,15 +19,14 @@ using Windows.Graphics.Imaging;
 using System.Collections.Generic;
 using Windows.Media.FaceAnalysis;
 using Windows.UI;
-using Microsoft.ProjectOxford.Face;
-using Microsoft.ProjectOxford.Face.Contract;
-using Microsoft.ProjectOxford.Emotion;
-using System.IO;
-using Windows.UI.Xaml.Media.Imaging;
-using Windows.Storage.Streams;
 using Windows.Media;
+using System.Threading;
+using Windows.System.Threading;
 using System.Collections.ObjectModel;
+using Microsoft.ProjectOxford.Face.Contract;
 using Microsoft.ProjectOxford.Emotion.Contract;
+using Windows.UI.Xaml.Media.Imaging;
+using Newtonsoft.Json.Linq;
 
 // The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
@@ -35,15 +34,14 @@ namespace FaceDetection.Controls
 {
     public sealed partial class FaceDetector : UserControl
     {
-        private IFaceServiceClient _faceServiceClient = null;
-        private EmotionServiceClient _emotionServiceClient = null;
-        public ObservableCollection<FaceDetails> FaceCollection
-        {
-            get;
-            set;
-        }
+        private DataSender _dataSender;
+        private FaceMetaData _faceMetaData;
+        private FaceTracker _faceTracker;
+        private ThreadPoolTimer _frameProcessingTimer;
+        private SemaphoreSlim _frameProcessingSemaphore = new SemaphoreSlim(1);
+        private VideoEncodingProperties _videoProperties;
 
-        public ObservableCollection<EmotionDetails> EmotionCollection
+        public ObservableCollection<FaceDetails> FaceCollection
         {
             get;
             set;
@@ -57,8 +55,6 @@ namespace FaceDetection.Controls
 
         // Prevent the screen from sleeping while the camera is running
         private readonly DisplayRequest _displayRequest = new DisplayRequest();
-
-        private FaceDetectionEffect _faceDetectionEffect;
 
         // MediaCapture and its state variables
         private MediaCapture _mediaCapture;
@@ -79,8 +75,6 @@ namespace FaceDetection.Controls
             this.InitializeComponent();
             FaceCollection = new ObservableCollection<FaceDetails>();
             FaceListBox.ItemsSource = FaceCollection;
-            EmotionCollection = new ObservableCollection<EmotionDetails>();
-            EmotionListBox.ItemsSource = EmotionCollection;
         }
 
         /// <summary>
@@ -89,13 +83,12 @@ namespace FaceDetection.Controls
         /// <returns></returns>
         public async Task Initialize(string faceKey, string emotionKey)
         {
-            _faceServiceClient = new FaceServiceClient(faceKey);
-            _emotionServiceClient = new EmotionServiceClient(emotionKey);
-
             Debug.WriteLine("Initialize-Facedetector");
 
             if (_mediaCapture == null)
             {
+                _faceMetaData = new FaceMetaData(faceKey, emotionKey);
+                _faceMetaData.DetectedFaces += FaceMetaData_DetectedFaces;
                 // Attempt to get the front camera if one is available, but use any camera device if not
                 //my lice-cam has Microsoft as part of its name, so I can select it with Microsoft name
                 var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
@@ -109,10 +102,11 @@ namespace FaceDetection.Controls
                 // Create MediaCapture and its settings
                 _mediaCapture = new MediaCapture();
 
-                // Register for a notification when something goes wrong
-                _mediaCapture.Failed += MediaCapture_Failed;
+               MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
 
-                var settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
+                settings.StreamingCaptureMode = StreamingCaptureMode.Video;
+                
+                _mediaCapture.Failed += this.MediaCapture_Failed;
 
                 _displayOrientation = _displayInformation.CurrentOrientation;
                 if (_orientationSensor != null)
@@ -124,6 +118,9 @@ namespace FaceDetection.Controls
                 try
                 {
                     await _mediaCapture.InitializeAsync(settings);
+                    // Cache the media properties as we'll need them later.
+                    var deviceController = _mediaCapture.VideoDeviceController;
+                    _videoProperties = deviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
                     _isInitialized = true;
                 }
                 catch (UnauthorizedAccessException)
@@ -154,7 +151,10 @@ namespace FaceDetection.Controls
 
                     // Clear any rectangles that may have been left over from a previous instance of the effect
                     FacesCanvas.Children.Clear();
-                    await CreateFaceDetectionEffectAsync();
+
+                    _faceTracker = await FaceTracker.CreateAsync();
+                    TimeSpan timerInterval = TimeSpan.FromMilliseconds(66); // 15 fps
+                    _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
                 }
             }
         }
@@ -171,11 +171,7 @@ namespace FaceDetection.Controls
 
             if (_isInitialized)
             {
-                if (_faceDetectionEffect != null)
-                {
-                    await CleanUpFaceDetectionEffectAsync();
-                }
-
+                
                 if (_previewProperties != null)
                 {
                     // The call to stop the preview is included here for completeness, but can be
@@ -185,6 +181,11 @@ namespace FaceDetection.Controls
                 }
 
                 _isInitialized = false;
+                if (this._frameProcessingTimer != null)
+                {
+                    this._frameProcessingTimer.Cancel();
+                    this._frameProcessingTimer = null;
+                }
             }
 
             if (_mediaCapture != null)
@@ -192,6 +193,11 @@ namespace FaceDetection.Controls
                 _mediaCapture.Failed -= MediaCapture_Failed;
                 _mediaCapture.Dispose();
                 _mediaCapture = null;
+            }
+
+            if(_faceMetaData != null)
+            {
+                //_faceMetaData.
             }
         }
 
@@ -263,57 +269,162 @@ namespace FaceDetection.Controls
             });
         }
 
-        /// <summary>
-        /// Adds face detection to the preview stream, registers for its events, enables it, and gets the FaceDetectionEffect instance
-        /// </summary>
-        /// <returns></returns>
-        private async Task CreateFaceDetectionEffectAsync()
+        private async void ProcessCurrentVideoFrame(ThreadPoolTimer timer)
         {
-            // Create the definition, which will contain some initialization settings
-            var definition = new FaceDetectionEffectDefinition();
+            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
+            {
+                if (_mediaCapture == null || _mediaCapture.CameraStreamState != Windows.Media.Devices.CameraStreamState.Streaming)
+                {
+                    return;
+                }
+                // If a lock is being held it means we're still waiting for processing work on the previous frame to complete.
+                // In this situation, don't wait on the semaphore but exit immediately.
+                if (!_frameProcessingSemaphore.Wait(0))
+                {
+                    return;
+                }
 
-            // To ensure preview smoothness, do not delay incoming samples
-            definition.SynchronousDetectionEnabled = false;
+                try
+                {
+                    IList<DetectedFace> faces = null;
 
-            // In this scenario, choose detection speed over accuracy
-            definition.DetectionMode = FaceDetectionMode.HighPerformance;
+                    // Create a VideoFrame object specifying the pixel format we want our capture image to be (NV12 bitmap in this case).
+                    // GetPreviewFrame will convert the native webcam frame into this format.
+                    const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Nv12;
+                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)this._videoProperties.Width, (int)this._videoProperties.Height))
+                    {
+                        await this._mediaCapture.GetPreviewFrameAsync(previewFrame);
 
-            // Add the effect to the preview stream
-            _faceDetectionEffect = (FaceDetectionEffect)await _mediaCapture.AddVideoEffectAsync(definition, MediaStreamType.VideoPreview);
+                        // The returned VideoFrame should be in the supported NV12 format but we need to verify this.
+                        if (Windows.Media.FaceAnalysis.FaceDetector.IsBitmapPixelFormatSupported(previewFrame.SoftwareBitmap.BitmapPixelFormat))
+                        {
+                            faces = await this._faceTracker.ProcessNextFrameAsync(previewFrame);
+                            if (faces != null && faces.Count > 0)
+                            {
+                                StartOnLineDetection();
+                            }
+                        }
+                        else
+                        {
+                            throw new System.NotSupportedException("PixelFormat '" + InputPixelFormat.ToString() + "' is not supported by FaceDetector");
+                        }
 
-            // Register for face detection events
-            _faceDetectionEffect.FaceDetected += FaceDetectionEffect_FaceDetected;
-
-            // Choose the shortest interval between detection events
-            _faceDetectionEffect.DesiredDetectionInterval = TimeSpan.FromMilliseconds(33);
-
-            // Start detecting faces
-            _faceDetectionEffect.Enabled = true;
+                      //  var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+                      //  {
+                            HighlightDetectedFaces(faces);
+                      //  });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+                    // {
+                    Debug.WriteLine("ProcessCurrentVideoFrame failed: " + ex.Message);
+                    // });
+                }
+                finally
+                {
+                    _frameProcessingSemaphore.Release();
+                }
+            });
         }
 
-        private async void FaceDetectionEffect_FaceDetected(FaceDetectionEffect sender, FaceDetectedEventArgs args)
+        private async void StartOnLineDetection()
         {
-            // Ask the UI thread to render the face bounding boxes
-            await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => HighlightDetectedFaces(args.ResultFrame.DetectedFaces));
+            try
+            {
+                //For online we need the frame in different format
+                const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Bgra8;
+                using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)this._videoProperties.Width, (int)this._videoProperties.Height))
+                {
+                    await this._mediaCapture.GetPreviewFrameAsync(previewFrame);
+                    _faceMetaData?.DetectFaces(previewFrame.SoftwareBitmap);
+                }
+            }
+            catch (Exception ex)
+            {
+                var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+                {
+                    Debug.WriteLine("StartOnLineDetection failed: " + ex.Message);
+                });
+            }
         }
-
-        /// <summary>
-        ///  Disables and removes the face detection effect, and unregisters the event handler for face detection
-        /// </summary>
-        /// <returns></returns>
-        private async Task CleanUpFaceDetectionEffectAsync()
+        private void FaceMetaData_DetectedFaces(FaceWithEmotions[] faces, SoftwareBitmap image)
         {
-            // Disable detection
-            _faceDetectionEffect.Enabled = false;
+            if(_dataSender == null)
+            {
+                _dataSender = new DataSender();
+            }
+            //Here we would need to send the data
+            _dataSender.SendData(faces, image);
 
-            // Unregister the event handler
-            _faceDetectionEffect.FaceDetected -= FaceDetectionEffect_FaceDetected;
+            PrintDebugDataToScreen(faces);
+        }
+        private void PrintDebugDataToScreen(FaceWithEmotions[] faces)
+        {
+            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+            {
+                if (faces != null)
+                {
+                    foreach (FaceWithEmotions faceEmotion in faces)
+                    {
+                        if (faceEmotion != null && faceEmotion.Face != null)
+                        {
+                            Emotion emotion = faceEmotion.Emotion;
+                            Face face = faceEmotion.Face;
+                            FaceAttributes attr = face.FaceAttributes;
+                            if (attr != null)
+                            {
+                                bool alreadyAdded = false;
+                                foreach (FaceDetails existingFace in FaceCollection)
+                                {
+                                    if (existingFace.FaceId == face.FaceId)
+                                    {
+                                        alreadyAdded = true;
+                                    }
+                                }
+                                if (!alreadyAdded)
+                                {
+                                    Debug.WriteLine("Add id : " + face.FaceId);
+                                    FaceCollection.Insert(0, FaceDetails.FromFaceAndEmotion(face, emotion));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        private void HighlightDetectedFaces(IList<DetectedFace> faces)
+        {
+            // Remove any existing rectangles from previous events
+            FacesCanvas.Children.Clear();
 
-            // Remove the effect from the preview stream
-            await _mediaCapture.ClearEffectsAsync(MediaStreamType.VideoPreview);
+            if (faces == null || faces.Count < 1)
+            {
+                return;
+            }
 
-            // Clear the member variable that held the effect instance
-            _faceDetectionEffect = null;
+            double width = this.ActualWidth;
+            double height = this.ActualHeight;
+  
+            // For each detected face
+            for (int i = 0; i < faces.Count; i++)
+            {
+                // Face coordinate units are preview resolution pixels, which can be a different scale from our display resolution, so a conversion may be necessary
+                Rectangle faceBoundingBox = ConvertPreviewToUiRectangle(faces[i].FaceBox);
+
+                // Set bounding box stroke properties
+                faceBoundingBox.StrokeThickness = 2;
+
+                // Highlight the first face in the set
+                faceBoundingBox.Stroke = (i == 0 ? new SolidColorBrush(Colors.Blue) : new SolidColorBrush(Colors.DeepSkyBlue));
+
+                // Add grid to canvas containing all face UI objects
+                FacesCanvas.Children.Add(faceBoundingBox);
+            }
+
+            // Update the face detection bounding box canvas orientation
+            SetFacesCanvasRotation();
         }
 
         /// <summary>
@@ -378,8 +489,7 @@ namespace FaceDetection.Controls
 
             double width = this.ActualWidth;
             double height = this.ActualHeight;
-            GetEmotionDetails(width,height); 
-            GetFaceDetails(width,height);
+           
             // For each detected face
             for (int i = 0; i < faces.Count; i++)
             {
@@ -398,129 +508,6 @@ namespace FaceDetection.Controls
 
             // Update the face detection bounding box canvas orientation
             SetFacesCanvasRotation();
-        }
-
-
-        bool _emotionProcessing = false;
-
-        public async void GetEmotionDetails(double width, double height)
-        {
-            if (_emotionProcessing)
-            {
-                return;
-            }
-
-            _emotionProcessing = true;
-
-            try
-            {
-                Debug.WriteLine("Emotion Photo size : " + width + "x" + height);
-                var jpgProperties = ImageEncodingProperties.CreateJpeg();
-                jpgProperties.Width = (uint)width;
-                jpgProperties.Height = (uint)height;
-
-                using (var randomAccessStream = new InMemoryRandomAccessStream())
-                {
-                    if (_mediaCapture != null)
-                    {
-                        await _mediaCapture.CapturePhotoToStreamAsync(jpgProperties, randomAccessStream);
-                        await randomAccessStream.FlushAsync();
-                        randomAccessStream.Seek(0);
-
-                        Emotion[] emotions = await _emotionServiceClient.RecognizeAsync(randomAccessStream.AsStream());
-
-                        foreach (Emotion emotion in emotions)
-                        {
-                            if (emotion != null)
-                            {
-                                Scores scores = emotion.Scores;
-                                if (scores != null)
-                                {
-                                    bool alreadyAdded = false;
-                                    foreach (EmotionDetails existingEmotion in EmotionCollection)
-                                    {
-                                        if (existingEmotion.GetHashCode() == scores.GetHashCode())
-                                        {
-                                            alreadyAdded = true;
-                                        }
-                                    }
-                                    if (!alreadyAdded)
-                                    {
-                                        Debug.WriteLine("Add hash : " + emotion.GetHashCode());
-                                        EmotionCollection.Insert(0, EmotionDetails.FromEmotion(emotion));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("Emotion ex : " + ex.Message);
-            }
-
-            _emotionProcessing = false;
-        }
-
-        bool _faceProcessing = false;
-
-        public async void GetFaceDetails(double width, double height)
-        {
-            if(_faceProcessing)
-            {
-                return;
-            }
-            _faceProcessing = true;
-
-            try
-            {
-                Debug.WriteLine("Face Photo size : " + width + "x" + height);
-                var jpgProperties = ImageEncodingProperties.CreateJpeg();
-                jpgProperties.Width = (uint)width;
-                jpgProperties.Height = (uint)height;
-
-                using (var randomAccessStream = new InMemoryRandomAccessStream())
-                {
-                    if (_mediaCapture != null)
-                    {
-                        await _mediaCapture.CapturePhotoToStreamAsync(jpgProperties, randomAccessStream);
-                        await randomAccessStream.FlushAsync();
-                        randomAccessStream.Seek(0);
-
-                        Face[] faces = await _faceServiceClient.DetectAsync(randomAccessStream.AsStream(), true, false, new FaceAttributeType[] { FaceAttributeType.Gender, FaceAttributeType.Age, FaceAttributeType.Smile, FaceAttributeType.FacialHair, FaceAttributeType.Glasses });
-
-                        foreach (Face face in faces)
-                        {
-                            if (face != null)
-                            {
-                                FaceAttributes attr = face.FaceAttributes;
-                                if (attr != null)
-                                {
-                                    bool alreadyAdded = false;
-                                    foreach (FaceDetails existingFace in FaceCollection)
-                                    {
-                                        if (existingFace.FaceId == face.FaceId)
-                                        {
-                                            alreadyAdded = true;
-                                        }
-                                    }
-                                    if (!alreadyAdded)
-                                    {
-                                        Debug.WriteLine("Add id : " + face.FaceId);
-                                        FaceCollection.Insert(0, FaceDetails.FromFace(face));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Debug.WriteLine("face ex : " + ex.Message);
-            }
-            _faceProcessing = false;
         }
 
         /// <summary>

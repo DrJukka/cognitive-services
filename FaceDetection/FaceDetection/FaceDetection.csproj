@@ -95,10 +95,7 @@
     <Compile Include="App.xaml.cs">
       <DependentUpon>App.xaml</DependentUpon>
     </Compile>
-    <Compile Include="Controls\EmotionDetailControl.xaml.cs">
-      <DependentUpon>EmotionDetailControl.xaml</DependentUpon>
-    </Compile>
-    <Compile Include="Controls\EmotionDetails.cs" />
+    <Compile Include="Controls\DataSender.cs" />
     <Compile Include="Controls\FaceDetailControl.xaml.cs">
       <DependentUpon>FaceDetailControl.xaml</DependentUpon>
     </Compile>
@@ -106,6 +103,8 @@
     <Compile Include="Controls\FaceDetector.xaml.cs">
       <DependentUpon>FaceDetector.xaml</DependentUpon>
     </Compile>
+    <Compile Include="Controls\FaceMetaData.cs" />
+    <Compile Include="Controls\FaceWithEmotions.cs" />
     <Compile Include="MainPage.xaml.cs">
       <DependentUpon>MainPage.xaml</DependentUpon>
     </Compile>
@@ -132,10 +131,6 @@
       <Generator>MSBuild:Compile</Generator>
       <SubType>Designer</SubType>
     </ApplicationDefinition>
-    <Page Include="Controls\EmotionDetailControl.xaml">
-      <SubType>Designer</SubType>
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Include="Controls\FaceDetailControl.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>

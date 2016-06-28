@@ -3,16 +3,22 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Microsoft.ProjectOxford.Face.Contract;
+using Microsoft.ProjectOxford.Emotion.Contract;
 
 namespace FaceDetection.Controls
 {
     public class FaceDetails : Face
     {
+        private Dictionary<string, float> _moods = new Dictionary<string, float>();
+        public String Mood1 { get; set; }
+        public String Mood2 { get; set; }
+        public String Mood3 { get; set; }
+
         public String Glasses { get; private set; }
         public String FacialHair { get; private set; }
 
         public String Smile { get; private set; }
-        public static FaceDetails FromFace(Face face)
+        public static FaceDetails FromFaceAndEmotion(Face face, Emotion emotion)
         {
             FaceDetails ret = new FaceDetails();
             ret.FaceAttributes = face.FaceAttributes;
@@ -54,6 +60,24 @@ namespace FaceDetection.Controls
             }
 
             ret.Smile = "Smile Value " + face.FaceAttributes.Smile;
+
+            if(emotion != null)
+            {
+                ret._moods.Add("Anger", emotion.Scores.Anger);
+                ret._moods.Add("Contempt", emotion.Scores.Contempt);
+                ret._moods.Add("Disgust", emotion.Scores.Disgust);
+                ret._moods.Add("Fear", emotion.Scores.Fear);
+                ret._moods.Add("Happiness", emotion.Scores.Happiness);
+                ret._moods.Add("Neutral", emotion.Scores.Neutral);
+                ret._moods.Add("Sadness", emotion.Scores.Sadness);
+                ret._moods.Add("Surprise", emotion.Scores.Surprise);
+
+                List<KeyValuePair<string, float>> sorted = (from kv in ret._moods orderby kv.Value select kv).ToList();
+
+                ret.Mood1 = sorted[7].Key;
+                ret.Mood2 = sorted[6].Key;
+                ret.Mood3 = sorted[5].Key;
+            }
 
             return ret;
         }

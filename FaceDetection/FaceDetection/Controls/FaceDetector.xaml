@@ -43,27 +43,5 @@
                 </ListView.ItemTemplate>
             </ListView>
         </Grid>
-        <Grid x:Name="emotionList" HorizontalAlignment="Right" VerticalAlignment="Stretch">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="50" />
-                <RowDefinition Height="*" />
-            </Grid.RowDefinitions>
-            <ListView
-                x:Name="EmotionListBox"
-                Grid.Row="1"
-                ItemContainerTransitions="{x:Null}">
-                <ListView.ItemContainerStyle>
-                    <Style TargetType="ListViewItem">
-                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    </Style>
-                </ListView.ItemContainerStyle>
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <local:EmotionDetailControl />
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-        </Grid>
-        
     </Grid>
 </UserControl>
