@@ -29,6 +29,8 @@ using Windows.UI.Xaml.Media.Imaging;
 using Newtonsoft.Json.Linq;
 using System.IO;
 using Windows.Storage.Streams;
+using Windows.Storage.Pickers;
+using Windows.Storage;
 
 // The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
@@ -60,7 +62,7 @@ namespace FaceDetection.Controls
 
         // MediaCapture and its state variables
         private MediaCapture _mediaCapture;
-        private bool _isInitialized;
+        private bool _isCaptureInitialized;
 
         private IMediaEncodingProperties _previewProperties;
 
@@ -87,76 +89,99 @@ namespace FaceDetection.Controls
         {
             Debug.WriteLine("Initialize-Facedetector");
 
-            if (_mediaCapture == null)
+            _faceMetaData = new FaceMetaData(faceKey, emotionKey);
+            _faceMetaData.DetectedFaces += FaceMetaData_DetectedFaces;
+
+            _displayOrientation = _displayInformation.CurrentOrientation;
+            if (_orientationSensor != null)
             {
-                _faceMetaData = new FaceMetaData(faceKey, emotionKey);
-                _faceMetaData.DetectedFaces += FaceMetaData_DetectedFaces;
-                // Attempt to get the front camera if one is available, but use any camera device if not
-                //my lice-cam has Microsoft as part of its name, so I can select it with Microsoft name
-                var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
+                _deviceOrientation = _orientationSensor.GetCurrentOrientation();
+            }
 
-                if (cameraDevice == null)
+            // Clear any rectangles that may have been left over from a previous instance of the effect
+            FacesCanvas.Children.Clear();
+
+            await InitMediaCapture();
+
+            _faceTracker = await FaceTracker.CreateAsync();
+            TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
+            _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
+        }
+
+        private async Task InitMediaCapture()
+        {
+            if (_mediaCapture != null)
+            {
+                return;//Already initialized
+            }
+
+            // Attempt to get the front camera if one is available, but use any camera device if not
+            //my lice-cam has Microsoft as part of its name, so I can select it with Microsoft name
+            var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
+
+            if (cameraDevice == null)
+            {
+                Debug.WriteLine("No camera device found!");
+                return;
+            }
+
+            // Create MediaCapture and its settings
+            _mediaCapture = new MediaCapture();
+
+            MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
+
+            settings.StreamingCaptureMode = StreamingCaptureMode.Video;
+
+            _mediaCapture.Failed += this.MediaCapture_Failed;
+
+            // Initialize MediaCapture
+            try
+            {
+                await _mediaCapture.InitializeAsync(settings);
+                // Cache the media properties as we'll need them later.
+                var deviceController = _mediaCapture.VideoDeviceController;
+                _videoProperties = deviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
+                _isCaptureInitialized = true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                Debug.WriteLine("The app was denied access to the camera");
+            }
+
+            // If initialization succeeded, start the preview
+            if (_isCaptureInitialized)
+            {
+                // Figure out where the camera is located
+                if (cameraDevice.EnclosureLocation == null || cameraDevice.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Unknown)
                 {
-                    Debug.WriteLine("No camera device found!");
-                    return;
+                    // No information on the location of the camera, assume it's an external camera, not integrated on the device
+                    _externalCamera = true;
+                }
+                else
+                {
+                    // Camera is fixed on the device
+                    _externalCamera = false;
+
+                    // Only mirror the preview if the camera is on the front panel
+                    _mirroringPreview = (cameraDevice.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Front);
                 }
 
-                // Create MediaCapture and its settings
-                _mediaCapture = new MediaCapture();
+                //StartPreviewAsync
+                // Prevent the device from sleeping while the preview is running
+                _displayRequest.RequestActive();
 
-                MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
+                // Set the preview source in the UI and mirror it if necessary
+                PreviewControl.Source = _mediaCapture;
+                PreviewControl.FlowDirection = _mirroringPreview ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
 
-                settings.StreamingCaptureMode = StreamingCaptureMode.Video;
-                
-                _mediaCapture.Failed += this.MediaCapture_Failed;
+                // Start the preview
+                await _mediaCapture.StartPreviewAsync();
+                _previewProperties = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview);
 
-                _displayOrientation = _displayInformation.CurrentOrientation;
-                if (_orientationSensor != null)
+                // Initialize the preview to the current orientation
+                if (_previewProperties != null)
                 {
-                    _deviceOrientation = _orientationSensor.GetCurrentOrientation();
-                }
-                
-                // Initialize MediaCapture
-                try
-                {
-                    await _mediaCapture.InitializeAsync(settings);
-                    // Cache the media properties as we'll need them later.
-                    var deviceController = _mediaCapture.VideoDeviceController;
-                    _videoProperties = deviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
-                    _isInitialized = true;
-                }
-                catch (UnauthorizedAccessException)
-                {
-                    Debug.WriteLine("The app was denied access to the camera");
-                }
-
-                // If initialization succeeded, start the preview
-                if (_isInitialized)
-                {
-                    // Figure out where the camera is located
-                    if (cameraDevice.EnclosureLocation == null || cameraDevice.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Unknown)
-                    {
-                        // No information on the location of the camera, assume it's an external camera, not integrated on the device
-                        _externalCamera = true;
-                    }
-                    else
-                    {
-                        // Camera is fixed on the device
-                        _externalCamera = false;
-
-                        // Only mirror the preview if the camera is on the front panel
-
-                        _mirroringPreview = (cameraDevice.EnclosureLocation.Panel == Windows.Devices.Enumeration.Panel.Front);
-                    }
-
-                    await StartPreviewAsync();
-
-                    // Clear any rectangles that may have been left over from a previous instance of the effect
-                    FacesCanvas.Children.Clear();
-
-                    _faceTracker = await FaceTracker.CreateAsync();
-                    TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
-                    _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
+                    await SetPreviewRotationAsync();
                 }
             }
         }
@@ -171,9 +196,8 @@ namespace FaceDetection.Controls
             Debug.WriteLine("DeInit-Facedetector");
             UnregisterEventHandlers();
 
-            if (_isInitialized)
+            if (_isCaptureInitialized)
             {
-                
                 if (_previewProperties != null)
                 {
                     // The call to stop the preview is included here for completeness, but can be
@@ -181,15 +205,13 @@ namespace FaceDetection.Controls
                     // as the preview will be automatically stopped at that point
                     await StopPreviewAsync();
                 }
-
-                _isInitialized = false;
-                if (this._frameProcessingTimer != null)
-                {
-                    this._frameProcessingTimer.Cancel();
-                    this._frameProcessingTimer = null;
-                }
+                _isCaptureInitialized = false;
             }
-
+            if (_frameProcessingTimer != null)
+            {
+                _frameProcessingTimer.Cancel();
+                _frameProcessingTimer = null;
+            }
             if (_mediaCapture != null)
             {
                 _mediaCapture.Failed -= MediaCapture_Failed;
@@ -205,30 +227,6 @@ namespace FaceDetection.Controls
             if(_dataSender != null)
             {
                 _dataSender.Close();
-            }
-        }
-
-        /// <summary>
-        /// Starts the preview and adjusts it for for rotation and mirroring after making a request to keep the screen on
-        /// </summary>
-        /// <returns></returns>
-        private async Task StartPreviewAsync()
-        {
-            // Prevent the device from sleeping while the preview is running
-            _displayRequest.RequestActive();
-
-            // Set the preview source in the UI and mirror it if necessary
-            PreviewControl.Source = _mediaCapture;
-            PreviewControl.FlowDirection = _mirroringPreview ? FlowDirection.RightToLeft : FlowDirection.LeftToRight;
-
-            // Start the preview
-            await _mediaCapture.StartPreviewAsync();
-            _previewProperties = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview);
-
-            // Initialize the preview to the current orientation
-            if (_previewProperties != null)
-            {
-                await SetPreviewRotationAsync();
             }
         }
 
@@ -249,10 +247,13 @@ namespace FaceDetection.Controls
                 rotationDegrees = (360 - rotationDegrees) % 360;
             }
 
-            // Add rotation metadata to the preview stream to make sure the aspect ratio / dimensions match when rendering and getting preview frames
-            var props = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview);
-            props.Properties.Add(RotationKey, rotationDegrees);
-            await _mediaCapture.SetEncodingPropertiesAsync(MediaStreamType.VideoPreview, props, null);
+            if (_mediaCapture != null)
+            {
+                // Add rotation metadata to the preview stream to make sure the aspect ratio / dimensions match when rendering and getting preview frames
+                var props = _mediaCapture.VideoDeviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview);
+                props.Properties.Add(RotationKey, rotationDegrees);
+                await _mediaCapture.SetEncodingPropertiesAsync(MediaStreamType.VideoPreview, props, null);
+            }
         }
 
         /// <summary>
@@ -261,6 +262,11 @@ namespace FaceDetection.Controls
         /// <returns></returns>
         private async Task StopPreviewAsync()
         {
+            if(_mediaCapture == null)
+            {
+                return;
+            }
+
             // Stop the preview
             _previewProperties = null;
             await _mediaCapture.StopPreviewAsync();
@@ -278,12 +284,13 @@ namespace FaceDetection.Controls
 
         private void ProcessCurrentVideoFrame(ThreadPoolTimer timer)
         {
-            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
+            if (_videoProperties == null)
             {
-                if (_mediaCapture == null || _mediaCapture.CameraStreamState != Windows.Media.Devices.CameraStreamState.Streaming)
-                {
-                    return;
-                }
+                return;
+            }
+
+            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
+            {    
                 // If a lock is being held it means we're still waiting for processing work on the previous frame to complete.
                 // In this situation, don't wait on the semaphore but exit immediately.
                 if (!_frameProcessingSemaphore.Wait(0))
@@ -295,45 +302,47 @@ namespace FaceDetection.Controls
                 {
                     IList<DetectedFace> faces = null;
 
-                    // Create a VideoFrame object specifying the pixel format we want our capture image to be (NV12 bitmap in this case).
-                    // GetPreviewFrame will convert the native webcam frame into this format.
                     const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Nv12;
-                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)this._videoProperties.Width, (int)this._videoProperties.Height))
+                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)_videoProperties.Width, (int)_videoProperties.Height))
                     {
-                        await this._mediaCapture.GetPreviewFrameAsync(previewFrame);
-
-                        // The returned VideoFrame should be in the supported NV12 format but we need to verify this.
-                        if (Windows.Media.FaceAnalysis.FaceDetector.IsBitmapPixelFormatSupported(previewFrame.SoftwareBitmap.BitmapPixelFormat))
+                        await GetPreviewVideoFrame(previewFrame);
+                        if (previewFrame.SoftwareBitmap != null)
                         {
-                            faces = await this._faceTracker.ProcessNextFrameAsync(previewFrame);
-                            if (faces != null && faces.Count > 0)
+                            // The returned VideoFrame should be in the supported NV12 format but we need to verify this.
+                            if (Windows.Media.FaceAnalysis.FaceDetector.IsBitmapPixelFormatSupported(previewFrame.SoftwareBitmap.BitmapPixelFormat))
                             {
-                                StartOnLineDetection();
+                                faces = await this._faceTracker.ProcessNextFrameAsync(previewFrame);
+                                if (faces != null && faces.Count > 0)
+                                {
+                                    StartOnLineDetection();
+                                }
                             }
-                        }
-                        else
-                        {
-                            throw new System.NotSupportedException("PixelFormat '" + InputPixelFormat.ToString() + "' is not supported by FaceDetector");
-                        }
+                            else
+                            {
+                                throw new System.NotSupportedException("PixelFormat '" + InputPixelFormat.ToString() + "' is not supported by FaceDetector");
+                            }
 
-                      //  var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-                      //  {
                             HighlightDetectedFaces(faces);
-                      //  });
+                        }
                     }
                 }
                 catch (Exception ex)
                 {
-                    // var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-                    // {
                     Debug.WriteLine("ProcessCurrentVideoFrame failed: " + ex.Message);
-                    // });
                 }
                 finally
                 {
                     _frameProcessingSemaphore.Release();
                 }
             });
+        }
+
+        private async Task GetPreviewVideoFrame(VideoFrame previewFrame)
+        {
+            if (_mediaCapture != null && _mediaCapture.CameraStreamState == Windows.Media.Devices.CameraStreamState.Streaming)
+            {
+                await _mediaCapture.GetPreviewFrameAsync(previewFrame);
+            }
         }
 
         private async void StartOnLineDetection()
@@ -344,7 +353,7 @@ namespace FaceDetection.Controls
                 const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Bgra8;
                 using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)this._videoProperties.Width, (int)this._videoProperties.Height))
                 {
-                    await this._mediaCapture.GetPreviewFrameAsync(previewFrame);
+                    await GetPreviewVideoFrame(previewFrame);
                     _faceMetaData?.DetectFaces(previewFrame.SoftwareBitmap);
                 }
             }
@@ -356,24 +365,25 @@ namespace FaceDetection.Controls
                 });
             }
         }
-        private async void FaceMetaData_DetectedFaces(FaceWithEmotions[] faces, SoftwareBitmap image)
+        private async void FaceMetaData_DetectedFaces(FaceWithEmotions[] faces)
         {
             if (_dataSender == null)
             {
                 _dataSender = new DataSender();
             }
-            PrintDebugDataToScreen(faces, image);
 
-            await _dataSender.SendData(faces, image);
+            PrintDebugDataToScreen(faces);
+
+            await _dataSender.SendData(faces);
         }
-        private void PrintDebugDataToScreen(FaceWithEmotions[] faces, SoftwareBitmap image)
+        private void PrintDebugDataToScreen(FaceWithEmotions[] faces)
         {
-            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
+            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
             {
                 //debug to show the image we got from preview
-                if (_dataSender != null)
-                {
-                    using (var randomAccessStream = new InMemoryRandomAccessStream())
+                
+
+                /*  using (var randomAccessStream = new InMemoryRandomAccessStream())
                     {
                         string imageString = await _dataSender.Base64Image(image);
                         var buffer = System.Convert.FromBase64String(imageString);
@@ -384,17 +394,17 @@ namespace FaceDetection.Controls
                             await writer.StoreAsync();
                         }
 
-                        /*
-                        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
-                        encoder.SetSoftwareBitmap(image);
-                        await encoder.FlushAsync();
-                        randomAccessStream.Seek(0);
-                        */
+                       
+                      //  var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
+                      //  encoder.SetSoftwareBitmap(image);
+                      //  await encoder.FlushAsync();
+                      //  randomAccessStream.Seek(0);
+                        
                         BitmapImage bitImage = new BitmapImage();
                         await bitImage.SetSourceAsync(randomAccessStream);
                         lastSendImage.Source = bitImage;
-                    }
-                }
+                    }*/
+                
                 //then show the data values
                 if (faces != null)
                 {
@@ -404,6 +414,10 @@ namespace FaceDetection.Controls
                     {
                         if (faceEmotion != null && faceEmotion.Face != null)
                         {
+                            if (faceEmotion.Bitmap != null)
+                            {
+                                lastSendImage.Source = faceEmotion.Bitmap;
+                            }
                             Emotion emotion = faceEmotion.Emotion;
                             Face face = faceEmotion.Face;
                             FaceAttributes attr = face.FaceAttributes;
@@ -795,5 +809,40 @@ namespace FaceDetection.Controls
 
         #endregion Helper functions
 
+
+        async void Play_Click(object sender, RoutedEventArgs e)
+        {
+            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, async () =>
+            {
+                var openPicker = new FileOpenPicker();
+                openPicker.SuggestedStartLocation = PickerLocationId.VideosLibrary;
+                openPicker.FileTypeFilter.Add(".wmv");
+                openPicker.FileTypeFilter.Add(".mp4");
+                var file = await openPicker.PickSingleFileAsync();
+                var stream = await file.OpenAsync(FileAccessMode.Read);
+
+                VideoControl.SetSource(stream, file.ContentType);
+                VideoControl.Play();
+                Debug.WriteLine("PLaying ...");
+            });
+        }
+
+        async void Pause_Click(object sender, RoutedEventArgs e)
+        {
+            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+            {
+                Debug.WriteLine("Paused .. ");
+                VideoControl.Pause();
+            });
+        }
+
+        async void Stop_Click(object sender, RoutedEventArgs e)
+        {
+            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+            {
+                Debug.WriteLine("Stoped ..");
+                VideoControl.Stop();
+            });
+        }
     }
 }

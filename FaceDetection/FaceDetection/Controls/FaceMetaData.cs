@@ -8,16 +8,18 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
+using System.Threading.Tasks;
 using Windows.Foundation;
 using Windows.Graphics.Imaging;
 
 using Windows.Storage.Streams;
 using Windows.System.Threading;
-
+using Windows.UI.Xaml.Media.Imaging;
 
 namespace FaceDetection.Controls
 {
-    public delegate void DetectedFaces(FaceWithEmotions[] faces, SoftwareBitmap image);
+    public delegate void DetectedFaces(FaceWithEmotions[] faces);
 
     public class FaceMetaData
     {
@@ -148,13 +150,16 @@ namespace FaceDetection.Controls
             }
         }
 
-        private void ProcessResults(Face[] faces, Emotion[] emotions, SoftwareBitmap bitmap)
+        private async void ProcessResults(Face[] faces, Emotion[] emotions, SoftwareBitmap swbitmap)
         {
-            if (faces != null || bitmap != null)
+            if (faces != null || swbitmap != null)
             {
                 try
                 {
-                    List<FaceWithEmotions> result = new List<FaceWithEmotions>(); 
+                    WriteableBitmap bitmap = new WriteableBitmap(swbitmap.PixelWidth, swbitmap.PixelHeight);
+                    swbitmap.CopyToBuffer(bitmap.PixelBuffer);
+
+                    List<FaceWithEmotions> result = new List<FaceWithEmotions>();
                     foreach (Face person in faces)
                     {
                         _seenAlready.Add(person.FaceId);
@@ -172,16 +177,17 @@ namespace FaceDetection.Controls
                                 }
                             }
                         }
-
-                        result.Add(new FaceWithEmotions(person, personEmotion));
+                        
+                        WriteableBitmap img = await CropAsync(bitmap, IncreaseSize(person.FaceRectangle, bitmap.PixelHeight, bitmap.PixelWidth));
+                        result.Add(new FaceWithEmotions(person, personEmotion, img));
                     }
 
-                    while(_seenAlready.Count > 10)
+                    while (_seenAlready.Count > 10)
                     {
                         _seenAlready.RemoveAt(0);
                     }
 
-                    DetectedFaces?.Invoke(result.ToArray(), bitmap);
+                    DetectedFaces?.Invoke(result.ToArray());
                 }
                 catch (Exception ex)
                 {
@@ -204,12 +210,85 @@ namespace FaceDetection.Controls
             }
         }
 
+        private FaceRectangle IncreaseSize(FaceRectangle face, Int32 imageHeight, Int32 imageWidth)
+        {
+            int Left   = face.Left - (face.Width / 6);
+            if(Left < 0)
+            {
+                Left = 0;
+            }
+            int Top    = face.Top - (face.Height / 3);
+            if(Top < 0)
+            {
+                Top = 0;
+            }
+            int Height = face.Height + (face.Height / 2);
+            if(Height > (imageHeight - Top))
+            {
+                Height = (imageHeight - Top);
+            }
+            int Width  = face.Width + (face.Width / 3);
+            if (Width > (imageWidth - Left))
+            {
+                Width = (imageWidth - Left);
+            }
+
+            FaceRectangle newRect = new FaceRectangle();
+            newRect.Left = Left;
+            newRect.Top = Top;
+            newRect.Height = Height;
+            newRect.Width = Width;
+
+            return newRect;
+        }
         private int RectIntersectDifference(FaceRectangle face, Rectangle emotion)
         {
             Rect faceRect = new Rect(new Point(face.Left, face.Top),new Size(face.Width, face.Height));
             faceRect.Intersect(new Rect(new Point(emotion.Left, emotion.Top), new Size(emotion.Width, emotion.Height)));
 
             return (int)(face.Width - faceRect.Width) + (int)(face.Height - faceRect.Height);       
+        }
+
+        public async Task<WriteableBitmap> CropAsync(WriteableBitmap originalImage, FaceRectangle rect)
+        {
+            WriteableBitmap CroppedImage = null;
+
+            double x = rect.Left;
+            double y = rect.Top;
+            double width = rect.Width;
+            double height = rect.Height;
+
+            x = Math.Round(x, 0);
+            y = Math.Round(y, 0);
+            width = Math.Round(width, 0);
+            height = Math.Round(height, 0);
+
+            byte[] originalImagePixelArray = originalImage.PixelBuffer.ToArray();
+            int bytesPerPixel = (int)Math.Round((double)originalImagePixelArray.Length / (originalImage.PixelWidth * originalImage.PixelHeight), 0);
+            int croppedImagePixelArrayLength = (int)width * (int)height * bytesPerPixel;
+            int offset = ((y - 1 >= 0) ? (int)((y - 1) * originalImage.PixelWidth * bytesPerPixel) : 0);
+            byte[] croppedImagePixelArray = new byte[croppedImagePixelArrayLength];
+            int croppedImagePixelArrayIndex = 0;
+            for (int line = 0; line < (int)height; ++line)
+            {
+                offset += (int)x * bytesPerPixel;
+                for (int i = 0; i < (int)(width * bytesPerPixel); ++i)
+                {
+                    croppedImagePixelArray[croppedImagePixelArrayIndex++] = originalImagePixelArray[offset + i];
+                }
+                offset += (int)(originalImage.PixelWidth - x) * bytesPerPixel;
+            }
+            CroppedImage = new WriteableBitmap((int)width, (int)height);
+            using (Stream stream = CroppedImage.PixelBuffer.AsStream())
+            {
+                if (stream.CanWrite)
+                {
+                    await stream.WriteAsync(croppedImagePixelArray, 0, croppedImagePixelArray.Length);
+                    stream.Flush();
+                }
+            }
+
+            return CroppedImage;
         }
     }
 }

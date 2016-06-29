@@ -17,8 +17,8 @@ namespace FaceDetection
     /// </summary>
     public sealed partial class MainPage : Page
     {
-        private string faceAPIKey = "Addme";
-        private string emotionAPIKey = "Addme";
+        private string faceAPIKey = "6171d608d75f4e47b0a836d16898c1f7";
+        private string emotionAPIKey = "df245a9e77ac4a129b9f21080aa1ee43";
 
         #region Constructor, lifecycle and navigation
 

@@ -13,7 +13,20 @@
         
         <Grid x:Name="PreviewGrid" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
             <!--Camera preview-->
-            <CaptureElement Name="PreviewControl" Stretch="Uniform"/>
+            <CaptureElement Visibility="Visible" Name="PreviewControl" Stretch="Uniform"/>
+
+            <StackPanel x:Name="VideoStackPanel" 
+                        VerticalAlignment="Stretch"
+                        HorizontalAlignment="Stretch" 
+                        Visibility="Collapsed">
+
+                <MediaElement x:Name="VideoControl"  Stretch="Uniform"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                    <Button Content="Play" Click="Play_Click"/>
+                    <Button Content="Pause" Click="Pause_Click"/>
+                    <Button Content="Stop" Click="Stop_Click" />
+                </StackPanel>
+            </StackPanel>
 
             <Canvas>
                 <!--Canvas that will host the face detection bounding boxes, will share the same bounds as the preview within the CaptureElement-->

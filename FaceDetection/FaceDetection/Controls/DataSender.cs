@@ -10,13 +10,16 @@ using Windows.UI.Xaml.Controls;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Diagnostics;
+using Windows.UI.Xaml.Media.Imaging;
+using System.Runtime.InteropServices.WindowsRuntime;
+using Microsoft.ProjectOxford.Face.Contract;
 
 namespace FaceDetection.Controls
 {
     public class DataSender
     {
         private HttpClient _Client;
-        private const string SERVER_URL = "http://www.drjukka.com";
+        private const string SERVER_URL = "http://localhost:8000/Test";
         public DataSender()
         {
             _Client = new HttpClient();
@@ -31,7 +34,7 @@ namespace FaceDetection.Controls
             }
         }
 
-        public async Task SendData(FaceWithEmotions[] faces, SoftwareBitmap image)
+        public async Task SendData(FaceWithEmotions[] faces)
         {
             if (_Client == null)
             {
@@ -40,50 +43,17 @@ namespace FaceDetection.Controls
 
             if (faces != null && faces.Length > 0)
             {
-                string imageString = await Base64Image(image);
-
                 foreach (FaceWithEmotions face in faces)
                 {
-                    if (face != null)
+                    if (face != null && face.Face != null)
                     {
-                        JObject obj = face.GetJsonObject(imageString);
+                        JObject obj = await face.GetJsonObject();
                         await DoPostData(SERVER_URL, obj);
                     }
                 }
             }
         }
-        public async Task<String> Base64Image(SoftwareBitmap image)
-        {
-            string imageString = "";
-            if (image != null)
-            {
-                using (var randomAccessStream = new InMemoryRandomAccessStream())
-                {
-                    var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
-                    encoder.SetSoftwareBitmap(image);
-                    await encoder.FlushAsync();
-                    randomAccessStream.Seek(0);
-
-                    imageString = GetBase64EncodedString(randomAccessStream.AsStream());
-                }
-            }
-
-            return imageString;
-        }
-        private string GetBase64EncodedString(Stream input)
-        {
-            byte[] buffer = new byte[input.Length];
-            using (MemoryStream ms = new MemoryStream())
-            {
-                int read;
-                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
-                {
-                    ms.Write(buffer, 0, read);
-                }
-                return Convert.ToBase64String(ms.ToArray());
-            }
-        }
-
+       
         private async Task DoPostData(string url, JObject obj)
         {
             try

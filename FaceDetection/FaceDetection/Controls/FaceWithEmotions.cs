@@ -3,11 +3,14 @@ using Microsoft.ProjectOxford.Face.Contract;
 using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices.WindowsRuntime;
 using System.Text;
 using System.Threading.Tasks;
 using Windows.Graphics.Imaging;
 using Windows.Storage.Streams;
+using Windows.UI.Xaml.Media.Imaging;
 
 namespace FaceDetection.Controls
 {
@@ -21,17 +24,28 @@ namespace FaceDetection.Controls
             get;
             private set;
         }
-        public FaceWithEmotions(Face face, Emotion emotion)
+
+        public WriteableBitmap Bitmap
+        {
+            get;
+            private set;
+        }
+     
+        public FaceWithEmotions(Face face, Emotion emotion, WriteableBitmap bitmap)
         {
             Face = face;
             Emotion = emotion;
+            Bitmap = bitmap;
         }
 
-        public JObject GetJsonObject(string image)
+        public async Task<JObject> GetJsonObject()
         {
             dynamic jsonObject = new JObject();
 
-            jsonObject.Add("image", image);//Base64Encoded jpg image
+            string imageString = await Base64Image(Bitmap);
+            //int yyy = imageString.Length;
+
+            jsonObject.Add("image", imageString);//Base64Encoded jpg image
 
             if (Face != null)
             {
@@ -50,7 +64,7 @@ namespace FaceDetection.Controls
                     jsonObject.faceAttributes.Add("age", Face.FaceAttributes.Age);
                     jsonObject.faceAttributes.Add("gender", Face.FaceAttributes.Gender);
                     jsonObject.faceAttributes.Add("smile", Face.FaceAttributes.Smile);
-                    
+
                     switch (Face.FaceAttributes.Glasses)
                     {
                         case Glasses.NoGlasses:
@@ -85,7 +99,7 @@ namespace FaceDetection.Controls
                 }
             }
 
-            if(Emotion != null && Emotion.Scores != null)
+            if (Emotion != null && Emotion.Scores != null)
             {
                 jsonObject.scores = new JObject();
                 jsonObject.scores.Add("anger", Emotion.Scores.Anger);
@@ -98,6 +112,48 @@ namespace FaceDetection.Controls
                 jsonObject.scores.Add("surprise", Emotion.Scores.Surprise);
             }
             return jsonObject;
+        }
+
+        private async Task<String> Base64Image(WriteableBitmap image)
+        {
+            string imageString = "";
+            if (image != null)
+            {
+                using (var randomAccessStream = new InMemoryRandomAccessStream())
+                {
+                    var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
+
+                    Stream pixelStream = image.PixelBuffer.AsStream();
+                    byte[] pixels = new byte[pixelStream.Length];
+                    await pixelStream.ReadAsync(pixels, 0, pixels.Length);
+
+                    encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Ignore,
+                                        (uint)image.PixelWidth,
+                                        (uint)image.PixelHeight,
+                                        96.0,
+                                        96.0,
+                                        pixels);
+                    await encoder.FlushAsync();
+                    randomAccessStream.Seek(0);
+
+                    imageString = GetBase64EncodedString(randomAccessStream.AsStream());
+                }
+            }
+
+            return imageString;
+        }
+        private string GetBase64EncodedString(Stream input)
+        {
+            byte[] buffer = new byte[input.Length];
+            using (MemoryStream ms = new MemoryStream())
+            {
+                int read;
+                while ((read = input.Read(buffer, 0, buffer.Length)) > 0)
+                {
+                    ms.Write(buffer, 0, read);
+                }
+                return Convert.ToBase64String(ms.ToArray());
+            }
         }
     }
 }
