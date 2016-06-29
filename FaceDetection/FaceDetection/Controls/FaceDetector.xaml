@@ -43,5 +43,14 @@
                 </ListView.ItemTemplate>
             </ListView>
         </Grid>
+        <Grid x:Name="debugImage" HorizontalAlignment="Right" VerticalAlignment="Stretch">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="50" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel Grid.Row="1">
+                <Image x:Name="lastSendImage" Width="200"></Image>
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

@@ -27,6 +27,8 @@ using Microsoft.ProjectOxford.Face.Contract;
 using Microsoft.ProjectOxford.Emotion.Contract;
 using Windows.UI.Xaml.Media.Imaging;
 using Newtonsoft.Json.Linq;
+using System.IO;
+using Windows.Storage.Streams;
 
 // The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
@@ -102,7 +104,7 @@ namespace FaceDetection.Controls
                 // Create MediaCapture and its settings
                 _mediaCapture = new MediaCapture();
 
-               MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
+                MediaCaptureInitializationSettings settings = new MediaCaptureInitializationSettings { VideoDeviceId = cameraDevice.Id };
 
                 settings.StreamingCaptureMode = StreamingCaptureMode.Video;
                 
@@ -153,7 +155,7 @@ namespace FaceDetection.Controls
                     FacesCanvas.Children.Clear();
 
                     _faceTracker = await FaceTracker.CreateAsync();
-                    TimeSpan timerInterval = TimeSpan.FromMilliseconds(66); // 15 fps
+                    TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
                     _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
                 }
             }
@@ -197,7 +199,12 @@ namespace FaceDetection.Controls
 
             if(_faceMetaData != null)
             {
-                //_faceMetaData.
+                _faceMetaData.Close();
+            }
+
+            if(_dataSender != null)
+            {
+                _dataSender.Close();
             }
         }
 
@@ -269,7 +276,7 @@ namespace FaceDetection.Controls
             });
         }
 
-        private async void ProcessCurrentVideoFrame(ThreadPoolTimer timer)
+        private void ProcessCurrentVideoFrame(ThreadPoolTimer timer)
         {
             var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
             {
@@ -349,23 +356,50 @@ namespace FaceDetection.Controls
                 });
             }
         }
-        private void FaceMetaData_DetectedFaces(FaceWithEmotions[] faces, SoftwareBitmap image)
+        private async void FaceMetaData_DetectedFaces(FaceWithEmotions[] faces, SoftwareBitmap image)
         {
-            if(_dataSender == null)
+            if (_dataSender == null)
             {
                 _dataSender = new DataSender();
             }
-            //Here we would need to send the data
-            _dataSender.SendData(faces, image);
+            PrintDebugDataToScreen(faces, image);
 
-            PrintDebugDataToScreen(faces);
+            await _dataSender.SendData(faces, image);
         }
-        private void PrintDebugDataToScreen(FaceWithEmotions[] faces)
+        private void PrintDebugDataToScreen(FaceWithEmotions[] faces, SoftwareBitmap image)
         {
-            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
+            var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
             {
+                //debug to show the image we got from preview
+                if (_dataSender != null)
+                {
+                    using (var randomAccessStream = new InMemoryRandomAccessStream())
+                    {
+                        string imageString = await _dataSender.Base64Image(image);
+                        var buffer = System.Convert.FromBase64String(imageString);
+
+                        using (DataWriter writer = new DataWriter(randomAccessStream.GetOutputStreamAt(0)))
+                        {
+                            writer.WriteBytes(buffer);
+                            await writer.StoreAsync();
+                        }
+
+                        /*
+                        var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
+                        encoder.SetSoftwareBitmap(image);
+                        await encoder.FlushAsync();
+                        randomAccessStream.Seek(0);
+                        */
+                        BitmapImage bitImage = new BitmapImage();
+                        await bitImage.SetSourceAsync(randomAccessStream);
+                        lastSendImage.Source = bitImage;
+                    }
+                }
+                //then show the data values
                 if (faces != null)
                 {
+                    FaceCollection.Clear();
+
                     foreach (FaceWithEmotions faceEmotion in faces)
                     {
                         if (faceEmotion != null && faceEmotion.Face != null)
@@ -375,19 +409,7 @@ namespace FaceDetection.Controls
                             FaceAttributes attr = face.FaceAttributes;
                             if (attr != null)
                             {
-                                bool alreadyAdded = false;
-                                foreach (FaceDetails existingFace in FaceCollection)
-                                {
-                                    if (existingFace.FaceId == face.FaceId)
-                                    {
-                                        alreadyAdded = true;
-                                    }
-                                }
-                                if (!alreadyAdded)
-                                {
-                                    Debug.WriteLine("Add id : " + face.FaceId);
-                                    FaceCollection.Insert(0, FaceDetails.FromFaceAndEmotion(face, emotion));
-                                }
+                                FaceCollection.Insert(0, FaceDetails.FromFaceAndEmotion(face, emotion));
                             }
                         }
                     }

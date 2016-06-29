@@ -148,7 +148,6 @@ namespace FaceDetection.Controls
             }
         }
 
-        // to avoid asking too many queries, lets have a quick break after each query
         private void ProcessResults(Face[] faces, Emotion[] emotions, SoftwareBitmap bitmap)
         {
             if (faces != null || bitmap != null)
@@ -192,6 +191,8 @@ namespace FaceDetection.Controls
 
             //_processingFace = false;
 
+            // to avoid asking too many queries, the limit is 20 per minute
+            // lets have a quick break after each query
             if (_threadPoolTimer == null)
             {
                 _threadPoolTimer = ThreadPoolTimer.CreateTimer((source) =>

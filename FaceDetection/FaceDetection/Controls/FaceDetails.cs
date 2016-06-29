@@ -21,45 +21,51 @@ namespace FaceDetection.Controls
         public static FaceDetails FromFaceAndEmotion(Face face, Emotion emotion)
         {
             FaceDetails ret = new FaceDetails();
-            ret.FaceAttributes = face.FaceAttributes;
-            ret.FaceId = face.FaceId;
-            ret.FaceLandmarks = face.FaceLandmarks;
-            ret.FaceRectangle = face.FaceRectangle;
 
-            switch ((int)face.FaceAttributes.Glasses) {
-                case 1:// Glasses.Sunglasses:
-                    ret.Glasses = "Sunglasses";
-                    break;
-                case 2:// Glasses.ReadingGlasses:
-                    ret.Glasses = "Glasses";
-                    break;
-                case 3:// Glasses.SwimmingGoggles:
-                    ret.Glasses = "SwimmingGoggles";
-                    break;
-                default:
-                    break;
-            }
+            if (face.FaceAttributes != null)
+            {
+                ret.FaceAttributes = face.FaceAttributes;
+                ret.FaceId = face.FaceId;
+                ret.FaceLandmarks = face.FaceLandmarks;
+                ret.FaceRectangle = face.FaceRectangle;
 
-            if (face.FaceAttributes.FacialHair.Beard > 0)
-            {
-                ret.FacialHair = "Beard";
-            }
-            else
-            {
-                if (face.FaceAttributes.FacialHair.Moustache > 0)
+                switch ((int)face.FaceAttributes.Glasses)
                 {
-                    ret.FacialHair = "Moustache";
+                    case 1:// Glasses.Sunglasses:
+                        ret.Glasses = "Sunglasses";
+                        break;
+                    case 2:// Glasses.ReadingGlasses:
+                        ret.Glasses = "Glasses";
+                        break;
+                    case 3:// Glasses.SwimmingGoggles:
+                        ret.Glasses = "SwimmingGoggles";
+                        break;
+                    default:
+                        ret.Glasses = "No glasses";
+                        break;
+                }
+
+                if (face.FaceAttributes.FacialHair.Beard > 0)
+                {
+                    ret.FacialHair = "Beard";
                 }
                 else
                 {
-                    if (face.FaceAttributes.FacialHair.Sideburns > 0)
+                    if (face.FaceAttributes.FacialHair.Moustache > 0)
                     {
-                        ret.FacialHair = "Sideburns";
+                        ret.FacialHair = "Moustache";
+                    }
+                    else
+                    {
+                        if (face.FaceAttributes.FacialHair.Sideburns > 0)
+                        {
+                            ret.FacialHair = "Sideburns";
+                        }
                     }
                 }
-            }
 
-            ret.Smile = "Smile Value " + face.FaceAttributes.Smile;
+                ret.Smile = "Smile Value " + face.FaceAttributes.Smile;
+            }
 
             if(emotion != null)
             {
