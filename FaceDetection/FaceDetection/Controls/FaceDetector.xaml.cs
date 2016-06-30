@@ -25,13 +25,7 @@ using Windows.System.Threading;
 using System.Collections.ObjectModel;
 using Microsoft.ProjectOxford.Face.Contract;
 using Microsoft.ProjectOxford.Emotion.Contract;
-using Windows.UI.Xaml.Media.Imaging;
-using Newtonsoft.Json.Linq;
-using System.IO;
-using Windows.Storage.Streams;
-using Windows.Storage.Pickers;
-using Windows.Storage;
-using Windows.Media.Editing;
+
 
 // The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
@@ -54,8 +48,6 @@ namespace FaceDetection.Controls
             set;
         }
 
-        private MediaComposition _mediaComposition;
-
         // Receive notifications about rotation of the device and UI and apply any necessary rotation to the preview stream and UI controls
         private readonly DisplayInformation _displayInformation = DisplayInformation.GetForCurrentView();
         private readonly SimpleOrientationSensor _orientationSensor = SimpleOrientationSensor.GetDefault();
@@ -68,6 +60,8 @@ namespace FaceDetection.Controls
         // MediaCapture and its state variables
         private MediaCapture _mediaCapture;
         private bool _isCaptureInitialized;
+        private string _faceKey;
+        private string _emotionKey;
 
         private IMediaEncodingProperties _previewProperties;
 
@@ -94,7 +88,10 @@ namespace FaceDetection.Controls
         {
             Debug.WriteLine("Initialize-Facedetector");
 
-            _faceMetaData = new FaceMetaData(faceKey, emotionKey);
+            _faceKey = faceKey;
+            _emotionKey = emotionKey;
+
+            _faceMetaData = new FaceMetaData(_faceKey, _emotionKey);
             _faceMetaData.DetectedFaces += FaceMetaData_DetectedFaces;
 
             _displayOrientation = _displayInformation.CurrentOrientation;
@@ -244,6 +241,14 @@ namespace FaceDetection.Controls
             }
         }
 
+        private async void Restart()
+        {
+            await DeInit();
+            FaceCollection.Clear();
+            lastSendImage.Source = null;
+            cameraSelectionList.Visibility = Visibility.Visible;
+            await Initialize(_faceKey, _emotionKey);
+        }
         /// <summary>
         /// Gets the current orientation of the UI in relation to the device (when AutoRotationPreferences cannot be honored) and applies a corrective rotation to the preview
         /// </summary>
@@ -300,7 +305,7 @@ namespace FaceDetection.Controls
         {
             var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
             {    
-                if(_mediaComposition == null && _mediaCapture == null)
+                if(_mediaCapture == null)
                 {
                     return;
                 }
@@ -337,7 +342,16 @@ namespace FaceDetection.Controls
         {
             IList<DetectedFace> faces = null;
 
-            if (_mediaCapture != null && _mediaCapture.CameraStreamState == Windows.Media.Devices.CameraStreamState.Streaming)
+            if(_mediaCapture == null)
+            {
+                return faces;
+            }
+
+            if (_mediaCapture.CameraStreamState == Windows.Media.Devices.CameraStreamState.Shutdown)
+            {
+                Restart();
+            }
+            else if (_mediaCapture.CameraStreamState == Windows.Media.Devices.CameraStreamState.Streaming)
             {
                 try
                 {

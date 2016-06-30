@@ -76,10 +76,10 @@ namespace FaceDetection.Controls
                     CheckPersons(detectedfaces, bitmap);
                 }
             }
-            catch (FaceAPIException ex)
+            catch (Exception ex)
             {
-                Debug.WriteLine("FaceAPIException HttpStatus: " + ex.HttpStatus + ", ErrorCode : " + ex.ErrorCode + ", ErrorMessage: " + ex.ErrorMessage);
-                Debug.WriteLine("DetectFaces exception : " + ex.ToString());
+             //   Debug.WriteLine("FaceAPIException HttpStatus: " + ex.HttpStatus + ", ErrorCode : " + ex.ErrorCode + ", ErrorMessage: " + ex.ErrorMessage);
+                Debug.WriteLine("DetectFaces exception : " + ex.Message);
                 ProcessResults(null, null, null);
             }
         }
