@@ -42,7 +42,6 @@ namespace FaceDetection.Controls
         private DataSender _dataSender;
         private FaceMetaData _faceMetaData;
         private FaceTracker _faceTracker;
-        private Windows.Media.FaceAnalysis.FaceDetector _faceDetector;
         private ThreadPoolTimer _frameProcessingTimer;
         private SemaphoreSlim _frameProcessingSemaphore = new SemaphoreSlim(1);
         
@@ -107,24 +106,24 @@ namespace FaceDetection.Controls
             // Clear any rectangles that may have been left over from a previous instance of the effect
             FacesCanvas.Children.Clear();
 
-            await InitMediaCapture();
-
-            _faceTracker = await FaceTracker.CreateAsync();
-            TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
-            _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
-
+            DeviceInformationCollection allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
+            CameraListBox.ItemsSource = allVideoDevices;
         }
 
-        private async Task InitMediaCapture()
+        private async void CameraSelectionListView_ItemClick(object sender, ItemClickEventArgs e)
         {
-            if (_mediaCapture != null)
+            DeviceInformation SelectedItem = (DeviceInformation)e.ClickedItem;
+            cameraSelectionList.Visibility = Visibility.Collapsed;
+            await InitMediaCapture(SelectedItem);
+        }
+        private async Task InitMediaCapture(DeviceInformation cameraDevice)
+        {
+            if (_mediaCapture != null || cameraDevice == null)
             {
                 return;//Already initialized
             }
 
-            // Attempt to get the front camera if one is available, but use any camera device if not
-            //my lice-cam has Microsoft as part of its name, so I can select it with Microsoft name
-            var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
+            //var cameraDevice = await FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel.Front, "Microsoft");
 
             if (cameraDevice == null)
             {
@@ -194,6 +193,10 @@ namespace FaceDetection.Controls
                 {
                     await SetPreviewRotationAsync();
                 }
+
+                _faceTracker = await FaceTracker.CreateAsync();
+                TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
+                _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
             }
         }
 
@@ -356,32 +359,6 @@ namespace FaceDetection.Controls
                     Debug.WriteLine("GetFacesonPreview failed : " + ex.Message);
                 }
             }
-            else if (_mediaComposition != null)
-            {
-                if (_faceDetector == null)
-                {
-                    _faceDetector = await Windows.Media.FaceAnalysis.FaceDetector.CreateAsync();
-                }
-
-                TimeSpan timeOfFrame = VideoControl.Position;
-
-                ImageStream imageStream = await _mediaComposition.GetThumbnailAsync(
-                        timeOfFrame,
-                        (int)_videoWidth, (int)_videoHeight,
-                        VideoFramePrecision.NearestFrame);
-
-                // Generate a bitmap 
-                // WriteableBitmap writableBitmap = new WriteableBitmap((int)_videoWidth, (int)_videoHeight);
-                // writableBitmap.SetSource(imageStream);
-                // previewFrame.SoftwareBitmap.CopyFromBuffer(writableBitmap.PixelBuffer);
-
-                WriteableBitmap writableBitmap = new WriteableBitmap((int)_videoWidth, (int)_videoHeight);
-                writableBitmap.SetSource(imageStream);
-                SoftwareBitmap detectorInput = new SoftwareBitmap(BitmapPixelFormat.Nv12, (int)_videoWidth, (int)_videoHeight);
-                detectorInput.CopyFromBuffer(writableBitmap.PixelBuffer);
-
-                faces = await _faceDetector.DetectFacesAsync(detectorInput);
-            }
 
             return faces;
         }
@@ -424,31 +401,6 @@ namespace FaceDetection.Controls
         {
             var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
             {
-                //debug to show the image we got from preview
-                
-
-                /*  using (var randomAccessStream = new InMemoryRandomAccessStream())
-                    {
-                        string imageString = await _dataSender.Base64Image(image);
-                        var buffer = System.Convert.FromBase64String(imageString);
-
-                        using (DataWriter writer = new DataWriter(randomAccessStream.GetOutputStreamAt(0)))
-                        {
-                            writer.WriteBytes(buffer);
-                            await writer.StoreAsync();
-                        }
-
-                       
-                      //  var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.JpegEncoderId, randomAccessStream);
-                      //  encoder.SetSoftwareBitmap(image);
-                      //  await encoder.FlushAsync();
-                      //  randomAccessStream.Seek(0);
-                        
-                        BitmapImage bitImage = new BitmapImage();
-                        await bitImage.SetSourceAsync(randomAccessStream);
-                        lastSendImage.Source = bitImage;
-                    }*/
-                
                 //then show the data values
                 if (faces != null)
                 {
@@ -765,13 +717,14 @@ namespace FaceDetection.Controls
         /// </summary>
         /// <param name="desiredPanel">The desired panel on which the returned device should be mounted, if available</param>
         /// <returns></returns>
-        private static async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel, string name)
+        private async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel, string name)
         {
             // Get available devices for capturing pictures
             DeviceInformationCollection  allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
 
             DeviceInformation desiredDevice = allVideoDevices.FirstOrDefault(x => x.Name.Contains(name));
-            // Get the desired camera by panel
+            
+            
             if (desiredDevice == null)
             {
                 desiredDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation != null && x.EnclosureLocation.Panel == desiredPanel);
@@ -852,86 +805,5 @@ namespace FaceDetection.Controls
         }
 
         #endregion Helper functions
-
-
-        async void Play_Click(object sender, RoutedEventArgs e)
-        {
-            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, async () =>
-            {
-                var openPicker = new FileOpenPicker();
-                openPicker.SuggestedStartLocation = PickerLocationId.VideosLibrary;
-                openPicker.FileTypeFilter.Add(".wmv");
-                openPicker.FileTypeFilter.Add(".mp4");
-                StorageFile file = await openPicker.PickSingleFileAsync();
-
-                if(await OpenVideoFileAsync(file))
-                {
-                    Debug.WriteLine("PLaying ...");
-                }else
-                {
-                    Debug.WriteLine("PLaying failed");
-                }
-            });
-        }
-
-        private async Task<bool> OpenVideoFileAsync(StorageFile videoStorageFile)
-        {
-            bool videoFileOpenedSuccessfully = false;
-
-            if (videoStorageFile != null)
-            {
-                // Get the video resolution
-                List<string> encodingPropertiesToRetrieve = new List<string>();
-                encodingPropertiesToRetrieve.Add("System.Video.FrameHeight");
-                encodingPropertiesToRetrieve.Add("System.Video.FrameWidth");
-                IDictionary<string, object> encodingProperties = await videoStorageFile.Properties.RetrievePropertiesAsync(encodingPropertiesToRetrieve);
-                _videoWidth = (uint)encodingProperties["System.Video.FrameWidth"];
-                _videoHeight = (uint)encodingProperties["System.Video.FrameHeight"];
-
-                MediaClip mediaClip = null;
-
-                // Use Windows.Media.Editing to get the ImageStream
-                try
-                {
-                    mediaClip = await MediaClip.CreateFromFileAsync(videoStorageFile);
-                }
-                catch (Exception e)
-                {
-                    Debug.WriteLine("OpenVideoFileAsync: Failed to create the media clip: " + e.Message);
-                }
-
-                if (mediaClip != null)
-                {
-                    _mediaComposition = new MediaComposition();
-                    _mediaComposition.Clips.Add(mediaClip);
-
-                    var stream = await videoStorageFile.OpenAsync(FileAccessMode.Read);
-                    VideoControl.SetSource(stream, videoStorageFile.ContentType);
-                    VideoControl.Play();
-
-                    videoFileOpenedSuccessfully = true;
-                }
-            }
-
-            return videoFileOpenedSuccessfully;
-        }
-
-        async void Pause_Click(object sender, RoutedEventArgs e)
-        {
-            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-            {
-                Debug.WriteLine("Paused .. ");
-                VideoControl.Pause();
-            });
-        }
-
-        async void Stop_Click(object sender, RoutedEventArgs e)
-        {
-            await Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal, () =>
-            {
-                Debug.WriteLine("Stoped ..");
-                VideoControl.Stop();
-            });
-        }
     }
 }
