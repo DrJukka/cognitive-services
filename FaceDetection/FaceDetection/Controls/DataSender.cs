@@ -19,7 +19,7 @@ namespace FaceDetection.Controls
     public class DataSender
     {
         private HttpClient _Client;
-        private const string SERVER_URL = "http://localhost:8000/Test";
+        private const string SERVER_URL = "http://localhost:8000/Phaser";
         public DataSender()
         {
             _Client = new HttpClient();

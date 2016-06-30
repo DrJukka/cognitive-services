@@ -31,6 +31,7 @@ using System.IO;
 using Windows.Storage.Streams;
 using Windows.Storage.Pickers;
 using Windows.Storage;
+using Windows.Media.Editing;
 
 // The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
 
@@ -41,15 +42,20 @@ namespace FaceDetection.Controls
         private DataSender _dataSender;
         private FaceMetaData _faceMetaData;
         private FaceTracker _faceTracker;
+        private Windows.Media.FaceAnalysis.FaceDetector _faceDetector;
         private ThreadPoolTimer _frameProcessingTimer;
         private SemaphoreSlim _frameProcessingSemaphore = new SemaphoreSlim(1);
-        private VideoEncodingProperties _videoProperties;
+        
+        private uint _videoWidth;
+        private uint _videoHeight;
 
         public ObservableCollection<FaceDetails> FaceCollection
         {
             get;
             set;
         }
+
+        private MediaComposition _mediaComposition;
 
         // Receive notifications about rotation of the device and UI and apply any necessary rotation to the preview stream and UI controls
         private readonly DisplayInformation _displayInformation = DisplayInformation.GetForCurrentView();
@@ -106,6 +112,7 @@ namespace FaceDetection.Controls
             _faceTracker = await FaceTracker.CreateAsync();
             TimeSpan timerInterval = TimeSpan.FromMilliseconds(200); // 66-15 fps, 200-5 fps
             _frameProcessingTimer = ThreadPoolTimer.CreatePeriodicTimer(new Windows.System.Threading.TimerElapsedHandler(ProcessCurrentVideoFrame), timerInterval);
+
         }
 
         private async Task InitMediaCapture()
@@ -140,7 +147,11 @@ namespace FaceDetection.Controls
                 await _mediaCapture.InitializeAsync(settings);
                 // Cache the media properties as we'll need them later.
                 var deviceController = _mediaCapture.VideoDeviceController;
-                _videoProperties = deviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
+                VideoEncodingProperties videoProperties = deviceController.GetMediaStreamProperties(MediaStreamType.VideoPreview) as VideoEncodingProperties;
+
+                _videoWidth = (uint)videoProperties.Width;
+                _videoHeight = (uint)videoProperties.Height;
+
                 _isCaptureInitialized = true;
             }
             catch (UnauthorizedAccessException)
@@ -284,13 +295,12 @@ namespace FaceDetection.Controls
 
         private void ProcessCurrentVideoFrame(ThreadPoolTimer timer)
         {
-            if (_videoProperties == null)
-            {
-                return;
-            }
-
             var ignored = this.Dispatcher.RunAsync(Windows.UI.Core.CoreDispatcherPriority.Normal,async () =>
             {    
+                if(_mediaComposition == null && _mediaCapture == null)
+                {
+                    return;
+                }
                 // If a lock is being held it means we're still waiting for processing work on the previous frame to complete.
                 // In this situation, don't wait on the semaphore but exit immediately.
                 if (!_frameProcessingSemaphore.Wait(0))
@@ -300,31 +310,14 @@ namespace FaceDetection.Controls
 
                 try
                 {
-                    IList<DetectedFace> faces = null;
+                    IList<DetectedFace> faces = await GetFacesonPreview();
 
-                    const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Nv12;
-                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)_videoProperties.Width, (int)_videoProperties.Height))
+                    if (faces != null && faces.Count > 0)
                     {
-                        await GetPreviewVideoFrame(previewFrame);
-                        if (previewFrame.SoftwareBitmap != null)
-                        {
-                            // The returned VideoFrame should be in the supported NV12 format but we need to verify this.
-                            if (Windows.Media.FaceAnalysis.FaceDetector.IsBitmapPixelFormatSupported(previewFrame.SoftwareBitmap.BitmapPixelFormat))
-                            {
-                                faces = await this._faceTracker.ProcessNextFrameAsync(previewFrame);
-                                if (faces != null && faces.Count > 0)
-                                {
-                                    StartOnLineDetection();
-                                }
-                            }
-                            else
-                            {
-                                throw new System.NotSupportedException("PixelFormat '" + InputPixelFormat.ToString() + "' is not supported by FaceDetector");
-                            }
-
-                            HighlightDetectedFaces(faces);
-                        }
+                        StartOnLineDetection();
                     }
+
+                    HighlightDetectedFaces(faces);
                 }
                 catch (Exception ex)
                 {
@@ -337,24 +330,75 @@ namespace FaceDetection.Controls
             });
         }
 
-        private async Task GetPreviewVideoFrame(VideoFrame previewFrame)
+        private async Task<IList<DetectedFace>> GetFacesonPreview()
         {
+            IList<DetectedFace> faces = null;
+
             if (_mediaCapture != null && _mediaCapture.CameraStreamState == Windows.Media.Devices.CameraStreamState.Streaming)
             {
-                await _mediaCapture.GetPreviewFrameAsync(previewFrame);
+                try
+                {
+                    const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Nv12;
+                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)_videoWidth, (int)_videoHeight))
+                    {
+                        await _mediaCapture.GetPreviewFrameAsync(previewFrame);
+                        if (previewFrame.SoftwareBitmap != null)
+                        {
+                            // The returned VideoFrame should be in the supported NV12 format but we need to verify this.
+                            if (Windows.Media.FaceAnalysis.FaceDetector.IsBitmapPixelFormatSupported(previewFrame.SoftwareBitmap.BitmapPixelFormat))
+                            {
+                                faces = await this._faceTracker.ProcessNextFrameAsync(previewFrame);
+                            }
+                        }
+                    }
+                }catch(Exception ex)
+                {
+                    Debug.WriteLine("GetFacesonPreview failed : " + ex.Message);
+                }
             }
+            else if (_mediaComposition != null)
+            {
+                if (_faceDetector == null)
+                {
+                    _faceDetector = await Windows.Media.FaceAnalysis.FaceDetector.CreateAsync();
+                }
+
+                TimeSpan timeOfFrame = VideoControl.Position;
+
+                ImageStream imageStream = await _mediaComposition.GetThumbnailAsync(
+                        timeOfFrame,
+                        (int)_videoWidth, (int)_videoHeight,
+                        VideoFramePrecision.NearestFrame);
+
+                // Generate a bitmap 
+                // WriteableBitmap writableBitmap = new WriteableBitmap((int)_videoWidth, (int)_videoHeight);
+                // writableBitmap.SetSource(imageStream);
+                // previewFrame.SoftwareBitmap.CopyFromBuffer(writableBitmap.PixelBuffer);
+
+                WriteableBitmap writableBitmap = new WriteableBitmap((int)_videoWidth, (int)_videoHeight);
+                writableBitmap.SetSource(imageStream);
+                SoftwareBitmap detectorInput = new SoftwareBitmap(BitmapPixelFormat.Nv12, (int)_videoWidth, (int)_videoHeight);
+                detectorInput.CopyFromBuffer(writableBitmap.PixelBuffer);
+
+                faces = await _faceDetector.DetectFacesAsync(detectorInput);
+            }
+
+            return faces;
         }
 
         private async void StartOnLineDetection()
         {
             try
             {
-                //For online we need the frame in different format
-                const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Bgra8;
-                using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)this._videoProperties.Width, (int)this._videoProperties.Height))
+                if (_mediaCapture != null)
                 {
-                    await GetPreviewVideoFrame(previewFrame);
-                    _faceMetaData?.DetectFaces(previewFrame.SoftwareBitmap);
+                    //For online we need the frame in different format
+                    const BitmapPixelFormat InputPixelFormat = BitmapPixelFormat.Bgra8;
+                    using (VideoFrame previewFrame = new VideoFrame(InputPixelFormat, (int)_videoWidth, (int)_videoHeight))
+                    {
+                        await _mediaCapture.GetPreviewFrameAsync(previewFrame);
+                        _faceMetaData?.DetectFaces(previewFrame.SoftwareBitmap);
+                    }
                 }
             }
             catch (Exception ex)
@@ -818,13 +862,58 @@ namespace FaceDetection.Controls
                 openPicker.SuggestedStartLocation = PickerLocationId.VideosLibrary;
                 openPicker.FileTypeFilter.Add(".wmv");
                 openPicker.FileTypeFilter.Add(".mp4");
-                var file = await openPicker.PickSingleFileAsync();
-                var stream = await file.OpenAsync(FileAccessMode.Read);
+                StorageFile file = await openPicker.PickSingleFileAsync();
 
-                VideoControl.SetSource(stream, file.ContentType);
-                VideoControl.Play();
-                Debug.WriteLine("PLaying ...");
+                if(await OpenVideoFileAsync(file))
+                {
+                    Debug.WriteLine("PLaying ...");
+                }else
+                {
+                    Debug.WriteLine("PLaying failed");
+                }
             });
+        }
+
+        private async Task<bool> OpenVideoFileAsync(StorageFile videoStorageFile)
+        {
+            bool videoFileOpenedSuccessfully = false;
+
+            if (videoStorageFile != null)
+            {
+                // Get the video resolution
+                List<string> encodingPropertiesToRetrieve = new List<string>();
+                encodingPropertiesToRetrieve.Add("System.Video.FrameHeight");
+                encodingPropertiesToRetrieve.Add("System.Video.FrameWidth");
+                IDictionary<string, object> encodingProperties = await videoStorageFile.Properties.RetrievePropertiesAsync(encodingPropertiesToRetrieve);
+                _videoWidth = (uint)encodingProperties["System.Video.FrameWidth"];
+                _videoHeight = (uint)encodingProperties["System.Video.FrameHeight"];
+
+                MediaClip mediaClip = null;
+
+                // Use Windows.Media.Editing to get the ImageStream
+                try
+                {
+                    mediaClip = await MediaClip.CreateFromFileAsync(videoStorageFile);
+                }
+                catch (Exception e)
+                {
+                    Debug.WriteLine("OpenVideoFileAsync: Failed to create the media clip: " + e.Message);
+                }
+
+                if (mediaClip != null)
+                {
+                    _mediaComposition = new MediaComposition();
+                    _mediaComposition.Clips.Add(mediaClip);
+
+                    var stream = await videoStorageFile.OpenAsync(FileAccessMode.Read);
+                    VideoControl.SetSource(stream, videoStorageFile.ContentType);
+                    VideoControl.Play();
+
+                    videoFileOpenedSuccessfully = true;
+                }
+            }
+
+            return videoFileOpenedSuccessfully;
         }
 
         async void Pause_Click(object sender, RoutedEventArgs e)

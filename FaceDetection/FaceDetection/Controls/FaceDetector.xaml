@@ -13,7 +13,7 @@
         
         <Grid x:Name="PreviewGrid" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
             <!--Camera preview-->
-            <CaptureElement Visibility="Visible" Name="PreviewControl" Stretch="Uniform"/>
+            <CaptureElement Visibility="Visible"  Name="PreviewControl" Stretch="Uniform"/>
 
             <StackPanel x:Name="VideoStackPanel" 
                         VerticalAlignment="Stretch"
