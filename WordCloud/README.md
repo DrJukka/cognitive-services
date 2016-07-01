@@ -16,7 +16,7 @@ The WordCloud app is using the voice recognition API for voice input, and feedin
 
 The WordCloudControl was originally designed by George Mamaladze, and you can find his implementation from [http://www.codeproject.com/](http://www.codeproject.com/Articles/224231/Word-Cloud-Tag-Cloud-Generator-Control-for-NET-Win). His version is targeting .NET environment, where as I needed UWP implementation, thus I ported the code.
 
-Min differenceies are on drawing, I ended up using Win2D for drawing, and then simply fixing anything that was handled differently between the platforms.
+Main differencies are on drawing, I ended up using Win2D for the drawing, and then simply fixing anything that was handled differently between the platforms to get it fully working.
 
 
 License

@@ -1,6 +1,6 @@
 # FaceDetection
 
-This project was made for demo purposes only, and mainly coded during one week in June 2016. The purse of this application is to detect faces and face details from people entering a room.
+This project was made for demo purposes only, and mainly coded during one week in June 2016. The purpose of this application is to detect faces and face details from people entering a room.
 
 
 ## Using the app

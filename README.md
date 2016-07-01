@@ -6,6 +6,6 @@ There are currently 3 apps here:
 
 1.  [FaceDetection](https://github.com/DrJukka/cognitive-services/tree/master/FaceDetection)
 
-2.  [ShowMyAddress](https://github.com/DrJukka/cognitive-services/tree/master/ShowMyAddress/ShowMyAddress)
+2.  [ShowMyAddress](https://github.com/DrJukka/cognitive-services/tree/master/ShowMyAddress)
 
 3.  [WordCloud](https://github.com/DrJukka/cognitive-services/tree/master/WordCloud)

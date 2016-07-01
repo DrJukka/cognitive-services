@@ -10,7 +10,7 @@ First you need to have Visual Studio capable of handling Universal Windows appli
 
 ## Notable issues
 
-I'm not using map key there, thus there is note complaining about it shown on the bottom of the map.
+I'm not using map key there, thus there is a note complaining about it shown on the bottom of the map.
 
 Also the API appears not to work enough well that we could use it directly for obtaining the address information for geocoding, anyway, its on-line API, so never know it might be getting better over the time, so feel free to try it yourself.
 
