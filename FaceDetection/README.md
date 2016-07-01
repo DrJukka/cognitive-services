@@ -27,4 +27,4 @@ License
 =======
 
 All samples under this folder are licensed with the MIT License. For more details, see
-[LICENSE](<../LICENSE.md>).
+[LICENSE](https://github.com/DrJukka/cognitive-services/blob/master/LICENSE).

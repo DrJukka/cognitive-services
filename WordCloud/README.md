@@ -23,6 +23,6 @@ License
 =======
 
 All samples except the WordCloudControl, under this folder are licensed with the MIT License. For more details, see
-[LICENSE](<../LICENSE.md>).
+[LICENSE](https://github.com/DrJukka/cognitive-services/blob/master/LICENSE).
 
 The WordCloudControl is using [The Code Project Open License (CPOL)](http://www.codeproject.com/info/cpol10.aspx)
