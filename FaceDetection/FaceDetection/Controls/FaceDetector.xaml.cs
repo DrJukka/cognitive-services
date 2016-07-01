@@ -26,11 +26,21 @@ using System.Collections.ObjectModel;
 using Microsoft.ProjectOxford.Face.Contract;
 using Microsoft.ProjectOxford.Emotion.Contract;
 
-
-// The User Control item template is documented at http://go.microsoft.com/fwlink/?LinkId=234236
-
 namespace FaceDetection.Controls
 {
+    // The usercontrol implementation first displays Camera selection list
+    // and the face detection can be started by clicking the list for selected camera
+    // in the beginning we are using FaceTracker for detecing faces
+    // once we got detection, we ighlight the detected face with rectangle drawn on top of it
+    // Note that FaceTracker appears to like Nv12 pixelformat and Face API does not work with it
+    // Thus we need to take another preview frame and pass it to the FaceMetaData for processing
+    // once done, we get array of FaceWithEmotions objects, 
+    // which we simply pass to the DataSender to be delivered to our HTTP proxy
+    // note that we constantly try giving new images to the FaceMetaData
+    // the max-rate is determined by _frameProcessingTimer timeout time
+    // However the FaceMetaData has its own internal logic to determine when it can start processing
+    // and if it is not on the right state, the image is simply ignored
+
     public sealed partial class FaceDetector : UserControl
     {
         private DataSender _dataSender;
@@ -520,43 +530,6 @@ namespace FaceDetection.Controls
         #region Face detection helpers
 
         /// <summary>
-        /// Iterates over all detected faces, creating and adding Rectangles to the FacesCanvas as face bounding boxes
-        /// </summary>
-        /// <param name="faces">The list of detected faces from the FaceDetected event of the effect</param>
-        private void HighlightDetectedFaces(IReadOnlyList<DetectedFace> faces)
-        {
-            // Remove any existing rectangles from previous events
-            FacesCanvas.Children.Clear();
-
-            if(faces == null || faces.Count < 1)
-            {
-                return;
-            }
-
-            double width = this.ActualWidth;
-            double height = this.ActualHeight;
-           
-            // For each detected face
-            for (int i = 0; i < faces.Count; i++)
-            {
-                // Face coordinate units are preview resolution pixels, which can be a different scale from our display resolution, so a conversion may be necessary
-                Rectangle faceBoundingBox = ConvertPreviewToUiRectangle(faces[i].FaceBox);
-
-                // Set bounding box stroke properties
-                faceBoundingBox.StrokeThickness = 2;
-
-                // Highlight the first face in the set
-                faceBoundingBox.Stroke = (i == 0 ? new SolidColorBrush(Colors.Blue) : new SolidColorBrush(Colors.DeepSkyBlue));
-
-                // Add grid to canvas containing all face UI objects
-                FacesCanvas.Children.Add(faceBoundingBox);
-            }
-
-            // Update the face detection bounding box canvas orientation
-            SetFacesCanvasRotation();
-        }
-
-        /// <summary>
         /// Takes face information defined in preview coordinates and returns one in UI coordinates, taking
         /// into account the position and size of the preview control.
         /// </summary>
@@ -719,84 +692,13 @@ namespace FaceDetection.Controls
         private async void MediaCapture_Failed(MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs)
         {
             Debug.WriteLine("MediaCapture_Failed: (0x{0:X}) {1}", errorEventArgs.Code, errorEventArgs.Message);
-
             await DeInit();
         }
 
         #endregion Event handlers
 
         #region Helper functions
-        /// <summary>
-        /// Attempts to find and return a device mounted on the panel specified, and on failure to find one it will return the first device listed
-        /// </summary>
-        /// <param name="desiredPanel">The desired panel on which the returned device should be mounted, if available</param>
-        /// <returns></returns>
-        private async Task<DeviceInformation> FindCameraDeviceByPanelAsync(Windows.Devices.Enumeration.Panel desiredPanel, string name)
-        {
-            // Get available devices for capturing pictures
-            DeviceInformationCollection  allVideoDevices = await DeviceInformation.FindAllAsync(DeviceClass.VideoCapture);
-
-            DeviceInformation desiredDevice = allVideoDevices.FirstOrDefault(x => x.Name.Contains(name));
-            
-            
-            if (desiredDevice == null)
-            {
-                desiredDevice = allVideoDevices.FirstOrDefault(x => x.EnclosureLocation != null && x.EnclosureLocation.Panel == desiredPanel);
-            }
-            // If there is no device mounted on the desired panel, return the first device found
-            return desiredDevice ?? allVideoDevices.FirstOrDefault();
-        }
-
-        /// <summary>
-        /// Calculates the current camera orientation from the device orientation by taking into account whether the camera is external or facing the user
-        /// </summary>
-        /// <returns>The camera orientation in space, with an inverted rotation in the case the camera is mounted on the device and is facing the user</returns>
-        private SimpleOrientation GetCameraOrientation()
-        {
-            if (_externalCamera)
-            {
-                // Cameras that are not attached to the device do not rotate along with it, so apply no rotation
-                return SimpleOrientation.NotRotated;
-            }
-
-            var result = _deviceOrientation;
-
-            // Account for the fact that, on portrait-first devices, the camera sensor is mounted at a 90 degree offset to the native orientation
-            if (_displayInformation.NativeOrientation == DisplayOrientations.Portrait)
-            {
-                switch (result)
-                {
-                    case SimpleOrientation.Rotated90DegreesCounterclockwise:
-                        result = SimpleOrientation.NotRotated;
-                        break;
-                    case SimpleOrientation.Rotated180DegreesCounterclockwise:
-                        result = SimpleOrientation.Rotated90DegreesCounterclockwise;
-                        break;
-                    case SimpleOrientation.Rotated270DegreesCounterclockwise:
-                        result = SimpleOrientation.Rotated180DegreesCounterclockwise;
-                        break;
-                    case SimpleOrientation.NotRotated:
-                        result = SimpleOrientation.Rotated270DegreesCounterclockwise;
-                        break;
-                }
-            }
-
-            // If the preview is being mirrored for a front-facing camera, then the rotation should be inverted
-            if (_mirroringPreview)
-            {
-                // This only affects the 90 and 270 degree cases, because rotating 0 and 180 degrees is the same clockwise and counter-clockwise
-                switch (result)
-                {
-                    case SimpleOrientation.Rotated90DegreesCounterclockwise:
-                        return SimpleOrientation.Rotated270DegreesCounterclockwise;
-                    case SimpleOrientation.Rotated270DegreesCounterclockwise:
-                        return SimpleOrientation.Rotated90DegreesCounterclockwise;
-                }
-            }
-
-            return result;
-        }
-
+       
         /// <summary>
         /// Converts the given orientation of the app on the screen to the corresponding rotation in degrees
         /// </summary>

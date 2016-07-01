@@ -19,17 +19,26 @@ using Windows.UI.Xaml.Media.Imaging;
 
 namespace FaceDetection.Controls
 {
+    //Output delegate giving out the results for the image given
     public delegate void DetectedFaces(FaceWithEmotions[] faces);
+
+    // This class is the main workhorse of the app
+    // The face detection is started by calling DetectFaces with bitmap
+    // First the Face API is used to get all faces & face details for them
+    // second step (currently commented out) is checking whether we already have seen the Face
+    // So we could skip dublicate detections
+    // then we use Emotion API to get emotions for all persons in the pic
+    // As Face and Emotion both simply return their own results and there is no direct way on linking them
+    // I'm using simplistic Rectangle overlapping calculations to see which emotions goes with which face
+    // Last step is then to Crop the Face for the detected person out from the main image
+    // for this I'm increasing the face rectange gotten from Face API to get the actual head, and not just the face area
 
     public class FaceMetaData
     {
         public DetectedFaces DetectedFaces;
-        /// <summary>
-        /// Face service client
-        /// </summary>
+       
         private IFaceServiceClient _faceServiceClient = null;
         private EmotionServiceClient _emotionServiceClient = null;
-
         private bool _processingFace = false;
         private ThreadPoolTimer _threadPoolTimer;
         private List<Guid> _seenAlready;

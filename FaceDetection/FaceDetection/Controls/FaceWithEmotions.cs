@@ -14,6 +14,8 @@ using Windows.UI.Xaml.Media.Imaging;
 
 namespace FaceDetection.Controls
 {
+    // this class is used to glue together all information we have for detected persons
+    // It also implements convenience function to get the data out as JSON
     public class FaceWithEmotions
     {
         public Face Face {

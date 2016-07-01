@@ -5,6 +5,8 @@ using System.Text;
 using Microsoft.ProjectOxford.Face.Contract;
 using Microsoft.ProjectOxford.Emotion.Contract;
 
+//This control is purely for debugging purpose, it will be used to show latest results in the UI
+// FaceDetailControl is used to display the data
 namespace FaceDetection.Controls
 {
     public class FaceDetails : Face
