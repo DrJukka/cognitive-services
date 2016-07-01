@@ -21,7 +21,7 @@ FaceMetaData then passes array of [FaceWithEmotions](https://github.com/DrJukka/
 
 ## Notable issues
 
-I was using public free key for the Face API, thus there is a limit of 20 queries / minute. Thus, there is timeout timer which causes the FaceMetaData to have 3 second delay after each successfull processing, thus if you need faster detection than what is currenrlt provided, all you need to do, is to get better key and remove the timer usage.
+I was using public free key for the Face API, thus there is a limit of 20 queries / minute. Thus, there is timeout timer which causes the FaceMetaData to have 3 second delay after each successfull processing, thus if you need faster detection than what is currenrly provided, all you need to do, is to get better key and remove the timer usage.
 
 License
 =======
